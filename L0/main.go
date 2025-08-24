@@ -19,9 +19,9 @@ func main() {
 	}
 
 	// подключаем базу данных
-	err = db.InitDB()
+	err = db.ConnectDB()
 	if err != nil {
-		fmt.Printf("ошибка вызова db.Init: %v\n", err)
+		fmt.Printf("ошибка вызова db.ConnectDB: %v\n", err)
 		return
 	}
 

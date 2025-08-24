@@ -5,14 +5,11 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/IPampurin/WB-technical-schools/L0/db"
 	"github.com/IPampurin/WB-technical-schools/L0/handlers"
 	"github.com/go-chi/chi/v5"
 )
 
 func Run() error {
-
-	db.ConnectDB()
 
 	// по умолчанию порт хоста 8081 (доступ в браузере на localhost:8081)
 	port, ok := os.LookupEnv("L0_PORT")
@@ -20,12 +17,14 @@ func Run() error {
 		port = "8081"
 	}
 
-	r := chi.NewRouter()
+	r := chi.NewRouter() // роутер
 
-	r.Get("/order", handlers.GetTasks)
-	r.Post("/order", handlers.PostTask)
-	r.Get("/order/{id}", handlers.GetTaskByID)
-	r.Delete("/order/{id}", handlers.DeleteTask)
+	// хендлеры
+	r.Get("/order", handlers.GetOrder)
+	r.Post("/order", handlers.PostOrder)
+	r.Get("/order/{order_uid}", handlers.GetOrderByID)
+	r.Delete("/order/{order_uid}", handlers.DeleteOrder)
 
+	// запускаем сервер
 	return http.ListenAndServe(fmt.Sprintf(":%v", port), r)
 }

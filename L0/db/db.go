@@ -1,6 +1,6 @@
 package db
 
-func InitDB() error {
+func ConnectDB() error {
 
 	return nil
 }
