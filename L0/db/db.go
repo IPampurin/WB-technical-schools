@@ -17,9 +17,9 @@ type Dbinstance struct {
 
 var DB Dbinstance
 
-func ConnectDB() {
+func ConnectDB() error {
 
-	// создаём URL для соединения с базой данных.
+	// dsn - URL для соединения с базой данных.
 	// Имя пользователя базы данных, пароль и имя базы данных, а также порт базы берутся из
 	// переменных окружения, они описаны в файле .env
 	dsn := fmt.Sprintf(
@@ -35,16 +35,16 @@ func ConnectDB() {
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
 	})
-
 	if err != nil {
-		log.Fatal("Не удалось подключиться к базе данных: ", err)
-		os.Exit(1)
+		log.Printf("Не удалось подключиться к базе данных: %v", err)
+		return fmt.Errorf("ошибка подключения к БД: %w", err)
 	}
 
 	log.Println("Подключение к базе данных установлено.")
 	db.Logger = logger.Default.LogMode(logger.Info)
 
-	log.Println("Запуск миграций")
+	log.Println("Запуск миграций.")
+
 	// собираем модели в срез
 	models := []interface{}{
 		&models.Order{},
@@ -55,11 +55,15 @@ func ConnectDB() {
 	// автомиграцию моделей выполняем списком
 	err = db.AutoMigrate(models...)
 	if err != nil {
-		log.Fatalf("Ошибка при выполнении миграций: %v", err)
+		log.Printf("Ошибка при выполнении миграций: %v", err)
+		return fmt.Errorf("ошибка миграции: %w", err)
 	}
+
 	log.Println("Миграции успешно применены.")
 
 	DB = Dbinstance{
 		Db: db,
 	}
+
+	return nil
 }

@@ -1,0 +1,23 @@
+services:
+  web:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - ${L0_PORT}:8081
+    volumes:
+      - .:/usr/src/app
+    command: go run main.go
+  db:
+    image: postgres
+    environment:
+      - POSTGRES_USER=${DBL0_USER}
+      - POSTGRES_PASSWORD=${DBL0_PASSWORD}
+      - POSTGRES_DB=${DBL0_NAME}
+    ports:
+      - ${DBL0_PORT}:5432
+    volumes:
+      - postgres-db:/var/lib/postgresql/data
+
+volumes:
+  postgres-db: 
