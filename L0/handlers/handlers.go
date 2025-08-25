@@ -53,25 +53,25 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Println("Получен заказ:", order)
-
-	// начинаем транзакцию
-	tx := db.DB.Db.Begin()
-	defer tx.Rollback()
-
+	/*
+		// начинаем транзакцию
+		tx := db.DB.Db.Begin()
+		defer tx.Rollback()
+	*/
 	// пишем данные в базу с учётом ассоциаций - заполняем все таблицы согласно структуре models
 	resultDB := db.DB.Db.Session(&gorm.Session{FullSaveAssociations: true}).Create(&order)
 	if resultDB.Error != nil {
 		http.Error(w, resultDB.Error.Error(), http.StatusBadRequest)
 		return
 	}
-
-	// коммитим успешную транзакцию
-	if err := tx.Commit(); err != nil {
-		log.Printf("Ошибка при коммите транзакции: %v", err)
-		http.Error(w, "Внутренняя ошибка сервера", http.StatusInternalServerError)
-		return
-	}
-
+	/*
+		// коммитим успешную транзакцию
+		if err := tx.Commit(); err != nil {
+			log.Printf("Ошибка при коммите транзакции: %v", err)
+			http.Error(w, "Внутренняя ошибка сервера", http.StatusInternalServerError)
+			return
+		}
+	*/
 	// завершаем работу функции
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
