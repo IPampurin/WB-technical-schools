@@ -12,7 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-func GetTasks(w http.ResponseWriter, r *http.Request) {
+func GetOrders(w http.ResponseWriter, r *http.Request) {
 	orders := []models.Order{}
 
 	resultDB := db.DB.Db.Find(&orders)
@@ -32,7 +32,7 @@ func GetTasks(w http.ResponseWriter, r *http.Request) {
 	w.Write(resp)
 }
 
-func PostTask(w http.ResponseWriter, r *http.Request) {
+func PostOrder(w http.ResponseWriter, r *http.Request) {
 	orders := new(models.Order)
 	var buf bytes.Buffer
 
@@ -59,7 +59,7 @@ func PostTask(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-func GetTaskByID(w http.ResponseWriter, r *http.Request) {
+func GetOrderByID(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -85,7 +85,7 @@ func GetTaskByID(w http.ResponseWriter, r *http.Request) {
 	w.Write(resp)
 }
 
-func DeleteTask(w http.ResponseWriter, r *http.Request) {
+func DeleteOrder(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)

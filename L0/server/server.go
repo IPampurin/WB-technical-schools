@@ -20,7 +20,7 @@ func Run() error {
 	r := chi.NewRouter() // роутер
 
 	// хендлеры
-	r.Get("/order", handlers.GetOrder)
+	r.Get("/order", handlers.GetOrders)
 	r.Post("/order", handlers.PostOrder)
 	r.Get("/order/{order_uid}", handlers.GetOrderByID)
 	r.Delete("/order/{order_uid}", handlers.DeleteOrder)
