@@ -19,16 +19,34 @@ var DB Dbinstance
 
 func ConnectDB() error {
 
-	// dsn - URL для соединения с базой данных.
 	// Имя пользователя базы данных, пароль и имя базы данных, а также порт базы берутся из
-	// переменных окружения, они описаны в файле .env
+	// переменных окружения, рекомендуется описать их в файле .env
+	portDB, ok := os.LookupEnv("DBL0_PORT")
+	if !ok {
+		portDB = "5432"
+	}
+	nameDB, ok := os.LookupEnv("DBL0_NAME")
+	if !ok {
+		nameDB = "level_zero_db"
+	}
+	passwordDB, ok := os.LookupEnv("DBL0_PASSWORD")
+	if !ok {
+		passwordDB = "postgres"
+	}
+	userDB, ok := os.LookupEnv("DBL0_USER")
+	if !ok {
+		userDB = "postgres"
+	}
+
+	// dsn - URL для соединения с базой данных.
 	dsn := fmt.Sprintf(
 		"host=db user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Europe/Moscow",
-		os.Getenv("DBL0_USER"),
-		os.Getenv("DBL0_PASSWORD"),
-		os.Getenv("DBL0_NAME"),
-		os.Getenv("DBL0_PORT"),
+		userDB,
+		passwordDB,
+		nameDB,
+		portDB,
 	)
+
 	// создаём подключение к базе данных.
 	// В &gorm.Config настраивается логер, который будет сохранять информацию
 	// обо всех активностях с базой данных.
