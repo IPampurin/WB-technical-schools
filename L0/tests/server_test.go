@@ -24,7 +24,7 @@ func setupRouter() http.Handler {
 	return r
 }
 
-// TestServerStart тестирует запускается сервер в принципе
+// TestServerStart тестирует запускается ли сервер в принципе
 func TestServerStart(t *testing.T) {
 
 	// создаем тестовый сервер
