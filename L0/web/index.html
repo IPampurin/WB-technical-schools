@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Поиск заказа</title>
+    <!-- Подключение стилей с версией для предотвращения кэширования -->
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container">
+        <h2>Поиск заказа</h2>
+        <form class="form-group" action="/order/" method="GET">
+            <label for="orderUid">Введите order_uid заказа:</label>
+            <input 
+                type="text" 
+                id="orderUid" 
+                name="order_uid" 
+                class="input-field" 
+                required 
+                placeholder="Введите UID заказа"
+            >
+            <button type="submit" class="submit-btn">Отправить</button>
+            <div id="error-message" class="error-message" style="display:none;"></div>
+        </form>
+        <script>
+            document.querySelector('form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const orderUid = document.querySelector('#orderUid').value.trim();
+                
+                if (!orderUid) {
+                    document.querySelector('#error-message').innerText = 'Параметр order_uid обязателен';
+                    document.querySelector('#error-message').style.display = 'block';
+                    return;
+                }
+                
+                document.querySelector('#error-message').style.display = 'none';
+                window.location.href = `/order/${orderUid}`;
+            });
+        </script>
+    </div>
+</body>
+</html>

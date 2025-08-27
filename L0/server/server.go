@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 
@@ -19,12 +20,20 @@ func Run() error {
 
 	r := chi.NewRouter() // роутер
 
-	// хендлеры
+	// статические файлы
+	staticFiles := http.FileServer(http.Dir("./web/static"))
+	r.Handle("/static/", http.StripPrefix("/static/", staticFiles))
+	// основной контент
+	mainFiles := http.FileServer(http.Dir("./web"))
+	r.Handle("/", mainFiles)
+
+	// роуты
 	r.Get("/orders", handlers.GetOrders)
 	r.Post("/order", handlers.PostOrder)
 	r.Get("/order/{order_uid}", handlers.GetOrderByID)
 	r.Delete("/order/{order_uid}", handlers.DeleteOrder)
 
 	// запускаем сервер
+	log.Printf("Запуск сервера на порту %s", port)
 	return http.ListenAndServe(fmt.Sprintf(":%v", port), r)
 }

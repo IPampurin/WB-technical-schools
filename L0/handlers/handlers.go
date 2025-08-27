@@ -129,31 +129,48 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Заказ UID = %s успешно добавлен в базу.", order.OrderUID)
 }
 
+// GetOrderByID выдаёт данные о заказе по order_uid
 func GetOrderByID(w http.ResponseWriter, r *http.Request) {
 
-	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	// получаем OrderUID из параметров запроса
+	orderUID := chi.URLParam(r, "order_uid")
+
+	if orderUID == "" {
+		log.Printf("Ошибка: order_uid не указан")
+		http.Error(w, "Параметр order_uid обязателен", http.StatusBadRequest)
+		return
+	}
+
+	// создаем экземпляр заказа
+	var order models.Order
+
+	// получаем заказ из базы данных
+	result := db.DB.Db.First(&order, "order_uid = ?", orderUID)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			log.Printf("Заказ с UID %s не найден", orderUID)
+			http.Error(w, "Заказ не найден", http.StatusNotFound)
+			return
+		}
+		log.Printf("Ошибка при получении заказа: %v", result.Error)
+		http.Error(w, "Ошибка при получении заказа", http.StatusInternalServerError)
+		return
+	}
+
+	// маршалим даные в JSON с отступами для читаемости
+	resp, err := json.MarshalIndent(order, "", "    ")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		log.Printf("Ошибка при маршалинге данных: %v", err)
+		http.Error(w, "Ошибка при формировании ответа", http.StatusInternalServerError)
 		return
 	}
 
-	order := new(models.Order)
-
-	resultDB := db.DB.Db.First(&order, id)
-	if resultDB.Error != nil {
-		http.Error(w, resultDB.Error.Error(), http.StatusBadRequest)
-		return
-	}
-
-	resp, err := json.Marshal(order)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
+	// формируем ответ
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
+
+	log.Printf("Заказ с UID %s успешно получен", orderUID)
 }
 
 // DeleteOrder удаляет заказ и связанные с ним данные в случае
