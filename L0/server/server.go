@@ -20,9 +20,6 @@ func Run() error {
 
 	r := chi.NewRouter() // роутер
 
-	// статические файлы
-	staticFiles := http.FileServer(http.Dir("./web/static"))
-	r.Handle("/static/", http.StripPrefix("/static/", staticFiles))
 	// основной контент
 	mainFiles := http.FileServer(http.Dir("./web"))
 	r.Handle("/", mainFiles)

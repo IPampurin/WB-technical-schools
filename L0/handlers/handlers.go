@@ -48,7 +48,7 @@ func GetOrders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// маршалим даные в JSON с отступами для читаемости
-	resp, err := json.MarshalIndent(orders, "", "  ")
+	resp, err := json.MarshalIndent(orders, "", "    ")
 	if err != nil {
 		log.Printf("Ошибка при маршалинге JSON: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
