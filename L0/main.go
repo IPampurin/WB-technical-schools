@@ -24,6 +24,7 @@ func main() {
 		fmt.Printf("ошибка вызова db.ConnectDB: %v\n", err)
 		return
 	}
+	defer db.CloseDB()
 
 	// запускаем сервер
 	err = server.Run()
