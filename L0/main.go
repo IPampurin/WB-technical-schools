@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 
-	"github.com/IPampurin/WB-technical-schools/L0/db"
-	"github.com/IPampurin/WB-technical-schools/L0/server"
+	"github.com/IPampurin/WB-technical-schools/L0/pkg/db"
+	"github.com/IPampurin/WB-technical-schools/L0/pkg/server"
 	"github.com/joho/godotenv"
 )
 

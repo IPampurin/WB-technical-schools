@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/IPampurin/WB-technical-schools/L0/db"
-	"github.com/IPampurin/WB-technical-schools/L0/models"
+	"github.com/IPampurin/WB-technical-schools/L0/pkg/db"
+	"github.com/IPampurin/WB-technical-schools/L0/pkg/models"
 	"github.com/go-chi/chi/v5"
 	"gorm.io/gorm"
 )

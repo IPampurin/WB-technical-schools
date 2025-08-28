@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/IPampurin/WB-technical-schools/L0/handlers"
+	"github.com/IPampurin/WB-technical-schools/L0/pkg/handlers"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -21,7 +21,7 @@ func Run() error {
 	r := chi.NewRouter() // роутер
 
 	// основной контент
-	mainFiles := http.FileServer(http.Dir("./web"))
+	mainFiles := http.FileServer(http.Dir("web"))
 	r.Handle("/", mainFiles)
 
 	// роуты

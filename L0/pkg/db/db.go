@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/IPampurin/WB-technical-schools/L0/models"
+	"github.com/IPampurin/WB-technical-schools/L0/pkg/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
