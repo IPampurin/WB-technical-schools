@@ -26,11 +26,11 @@ func main() {
 	defer w.Close()
 
 	msgs := []string{
-		"тырмандыр раз",
-		"тырмандыр два",
-		"тырмандыр три",
-		"тырмандыр четыре",
-		"тырмандыр пять",
+		"test 6",
+		"test 7",
+		"test 8",
+		"test 9",
+		"test 10",
 	}
 
 	for i, msgBody := range msgs {
@@ -46,7 +46,7 @@ func main() {
 		} else {
 			fmt.Printf("Отправленное в кафку сообщение: %s\n", msgBody)
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	fmt.Println("Producer finished.")
