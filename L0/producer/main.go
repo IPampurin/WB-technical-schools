@@ -4,14 +4,18 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/segmentio/kafka-go"
 )
 
-const topic = "my-topic"
-
 func main() {
+
+	topic, ok := os.LookupEnv("TOPIC_L0")
+	if !ok {
+		topic = "my-topic"
+	}
 
 	conn, err := kafka.DialLeader(context.Background(), "tcp", "localhost:9092", topic, 0)
 	if err != nil {

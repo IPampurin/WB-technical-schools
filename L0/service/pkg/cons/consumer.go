@@ -1,44 +1,48 @@
-package main
+package consumer
 
 import (
+	"context"
 	"fmt"
+	"log"
+	"os"
 	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/segmentio/kafka-go"
 )
 
-func main() {
+func Consumer() {
 
-	c, err := kafka.NewWriter(&kafka.WriterMap{
-		"bootstrap.servers": "localhost",
-		"group.id":          "myGroup",
-		"auto.offset.reset": "earliest",
+	topic, ok := os.LookupEnv("TOPIC_L0")
+	if !ok {
+		topic = "my-topic"
+	}
+	groupID, ok := os.LookupEnv("GroupID_L0")
+	if !ok {
+		groupID = "my-groupID"
+	}
+
+	r := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:  []string{"localhost:9092"},
+		Topic:    topic,
+		GroupID:  groupID,
+		MinBytes: 0,
+		MaxWait:  10 * time.Second,
 	})
+	defer r.Close()
 
-	if err != nil {
-		panic(err)
-	}
+	fmt.Printf("Консьюмер подписан на топик '%s' в группе '%s'\n\n", topic, groupID)
 
-	err = c.SubscribeTopics([]string{"myTopic", "^aRegex.*[Tt]opic"}, nil)
+	fmt.Println("начинаем вычитывать !!!")
 
-	if err != nil {
-		panic(err)
-	}
-
-	// A signal handler or similar could be used to set this to false to break the loop.
-	run := true
-
-	for run {
-		msg, err := c.ReadMessage(time.Second)
-		if err == nil {
-			fmt.Printf("Message on %s: %s\n", msg.TopicPartition, string(msg.Value))
-		} else if !err.(kafka.Error).IsTimeout() {
-			// The client will automatically try to recover from all errors.
-			// Timeout is not considered an error because it is raised by
-			// ReadMessage in absence of messages.
-			fmt.Printf("Consumer error: %v (%v)\n", err, msg)
+	ctx := context.Background()
+	for {
+		m, err := r.FetchMessage(ctx)
+		if err != nil {
+			log.Fatalf("ошибка чтения из кафки: %v\n", err)
+		}
+		fmt.Printf("%s: %s\n\n", string(m.Key), string(m.Value))
+		if err := r.CommitMessages(ctx, m); err != nil {
+			log.Fatal("failed to commit messages:", err)
 		}
 	}
-
-	c.Close()
 }
