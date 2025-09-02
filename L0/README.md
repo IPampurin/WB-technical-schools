@@ -35,12 +35,10 @@
 - Docker Desktop 4.44.3
 - Свободные порты: 9092 (Kafka), 8081 (Web), 5432 (PostgreSQL)
 
-🐳 **Используемые Docker-образы**
-Компонент   Образ   Версия
-Zookeeper   confluentinc/cp-zookeeper   7.9.0
-Kafka   confluentinc/cp-kafka   7.9.0
-PostgreSQL  postgres    latest
-Веб-сервис  custom-go-app   -
+🐳 **Используемые Docker-образы**  
+     confluentinc/cp-zookeeper 7.9.0  
+     confluentinc/cp-kafka 7.9.0  
+     postgres latest  
 
 **Запуск системы:**
     - Запустите Kafka-брокер: cd kafka && docker compose up
@@ -70,5 +68,5 @@ PostgreSQL  postgres    latest
 ### 🧪 Тестирование
 
     cd service/tests && go test -v
-    
+
     Вы можете провести тесты работы сервера и базы данных командой "go test" в директории /service/tests/.  
