@@ -1,25 +1,20 @@
-package consumer
+package cons
 
 import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
 	"github.com/segmentio/kafka-go"
 )
 
-func Consumer() {
+const (
+	topic   = "my-topic-L0"
+	groupID = "my-groupID"
+)
 
-	topic, ok := os.LookupEnv("TOPIC_L0")
-	if !ok {
-		topic = "my-topic"
-	}
-	groupID, ok := os.LookupEnv("GroupID_L0")
-	if !ok {
-		groupID = "my-groupID"
-	}
+func Consumer() {
 
 	r := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:  []string{"localhost:9092"},

@@ -5,10 +5,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    env_file:
-      - ./.producer.env
     image: my-producer  
     working_dir: /usr/src/app
+    command: go run main.go
     volumes:
       - ./:/usr/src/app
     network_mode: "host"

@@ -28,7 +28,7 @@ func ConnectDB() error {
 	}
 	nameDB, ok := os.LookupEnv("DBL0_NAME")
 	if !ok {
-		nameDB = "level_zero_db"
+		nameDB = "level-zero-db"
 	}
 	passwordDB, ok := os.LookupEnv("DBL0_PASSWORD")
 	if !ok {
@@ -39,7 +39,7 @@ func ConnectDB() error {
 		userDB = "postgres"
 	}
 
-	// dsn - URL для соединения с базой данных.
+	// dsn - URL для соединения с базой данных. db имя сервиса БД из docker-compose
 	dsn := fmt.Sprintf(
 		"host=db user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Europe/Moscow",
 		userDB,
