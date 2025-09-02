@@ -1,118 +1,275 @@
 <!DOCTYPE html>
 <html lang="ru">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Поиск заказа</title>
-</head>
-<body style="
-    margin: 0;
-    padding: 0;
-    font-family: Arial, sans-serif;
-    background-color: #E6E6FA;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-    font-size: 16px;
-">
-    <div class="container" style="
-        background-color: white;
-        padding: 20px;
-        border-radius: 8px;
-        box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        width: 300px;
-        text-align: center;
-    ">
-        <h2 style="
-            font-size: 1.5rem;
-            margin-bottom: 20px;
-            color: #333;
-        ">Поиск заказа</h2>
-        
-        <form class="form-group" action="/order/" method="GET" style="
+    <title>Управление заказами</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background-color: #E6E6FA;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-size: 16px;
+        }
+
+        .main-container {
+            display: flex;
+            gap: 20px;
+            padding: 20px;
+        }
+
+        .window {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            width: 300px;
+        }
+
+        .form-group {
             display: flex;
             flex-direction: column;
             align-items: center;
             gap: 10px;
             margin-top: 20px;
-        ">
-            <label for="orderUid" style="
-                display: block;
-                text-align: left;
-                width: 80%;
-                color: #333;
-            ">Введите order_uid заказа:</label>
-            
-            <input 
-                type="text" 
-                id="orderUid" 
-                name="order_uid" 
-                style="
-                    padding: 10px;
-                    width: 80%;
-                    border: 1px solid #ccc;
-                    border-radius: 4px;
-                "
-                required 
-                placeholder="Введите UID заказа"
-            >
-            
-            <button type="submit" style="
-                padding: 10px 20px;
-                background-color: #808080;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                margin-top: 15px;
-            ">Отправить</button>
-            
-            <div id="error-message" style="
-                color: red;
-                margin-top: 15px;
-                text-align: left;
-                width: 80%;
-                display: none;
-            "></div>
-        </form>
+        }
+    </style>
+</head>
 
-        <!-- Секция с текстом и кнопкой -->
-        <div style="
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            width: 100%;
-            margin-top: 20px;
-            gap: 20px;
-        ">
-            <p style="
-                margin: 0;
-                font-size: 1rem;
-                color: #333;
-            ">Чтобы увидеть все заказы</p>
-            
-            <button onclick="showAllOrders()" style="
-                padding: 10px 20px;
-                background-color: #4CAF50;
-                color: white;
-                border: none;
+<body>
+    <div class="main-container">
+        <!-- Левое окно (оригинал) -->
+        <div class="window">
+            <h2 style="font-size: 1.5rem; margin-bottom: 20px; color: #333;">Поиск заказа</h2>
+            <form class="form-group" action="/order/" method="GET">
+                <label for="orderUid" style="display: block; text-align: left; width: 80%; color: #333;">
+                    Введите order_uid заказа:
+                </label>
+                <input type="text" id="orderUid" name="order_uid"
+                    style="padding: 10px; width: 80%; border: 1px solid #ccc; border-radius: 4px;" required
+                    placeholder="Введите UID заказа">
+                <button type="submit"
+                    style="padding: 10px 20px; background-color: #808080; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 15px;">
+                    Отправить
+                </button>
+                <div id="error-message"
+                    style="color: red; margin-top: 15px; text-align: left; width: 80%; display: none;"></div>
+            </form>
+
+            <div
+                style="display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 20px; gap: 20px;">
+                <p style="margin: 0; font-size: 1rem; color: #333;">Чтобы увидеть все заказы</p>
+                <button onclick="showAllOrders()"
+                    style="padding: 10px 20px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                    Показать все заказы
+                </button>
+            </div>
+        </div>
+
+        <!-- Среднее окно (Ввод заказа) -->
+        <div class="window">
+            <h2 style="font-size: 1.5rem; margin-bottom: 20px; color: #333;">Ввод заказа</h2>
+            <form class="form-group" id="createOrderForm">
+                <label for="newOrder" style="display: block; text-align: left; width: 80%; color: #333;">
+                    Введите данные заказа (JSON):
+                </label>
+                <textarea id="newOrder" style="
+                padding: 10px;
+                width: 80%;
+                height: 150px;
+                border: 1px solid #ccc;
                 border-radius: 4px;
-                cursor: pointer;
-            ">Показать все заказы</button>
+                font-family: monospace;
+                resize: vertical;
+            " required placeholder='{"order_uid": "test123", "track_number": "WB123456789", ...}'></textarea>
+
+                <button type="submit" style="
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 15px;
+        ">
+                    Создать заказ
+                </button>
+
+                <div id="create-error" style="
+            color: red;
+            margin-top: 15px;
+            text-align: left;
+            width: 80%;
+            display: none;
+        "></div>
+
+                <div id="create-success" style="
+            color: green;
+            margin-top: 15px;
+            text-align: left;
+            width: 80%;
+            display: none;
+        "></div>
+            </form>
+        </div>
+
+        <!-- Правое окно (Удаление заказа) -->
+        <div class="window">
+            <h2 style="font-size: 1.5rem; margin-bottom: 20px; color: #333;">Удаление заказа</h2>
+            <form class="form-group" id="deleteOrderForm">
+                <label for="deleteOrder" style="display: block; text-align: left; width: 80%; color: #333;">
+                    Введите order_uid заказа:
+                </label>
+                <input type="text" id="deleteOrder"
+                    style="padding: 10px; width: 80%; border: 1px solid #ccc; border-radius: 4px;" required
+                    placeholder="UID для удаления">
+
+                <button type="submit" style="
+ padding: 10px 20px;
+ background-color: #ff4444;
+ color: white;
+ border: none;
+ border-radius: 4px;
+ cursor: pointer;
+ margin-top: 15px;
+ ">
+                    Удалить заказ
+                </button>
+
+                <div id="delete-error" style="
+ color: red;
+ margin-top: 15px;
+ text-align: left;
+ width: 80%;
+ display: none;
+ "></div>
+
+                <div id="delete-success" style="
+ color: green;
+ margin-top: 15px;
+ text-align: left;
+ width: 80%;
+ display: none;
+ "></div>
+            </form>
         </div>
 
         <script>
-            document.querySelector('form').addEventListener('submit', function(e) {
+            // Финальный исправленный обработчик создания заказа
+            document.getElementById('createOrderForm').addEventListener('submit', async function (e) {
+                e.preventDefault();
+                const textarea = document.getElementById('newOrder');
+                const errorDiv = document.getElementById('create-error');
+                const successDiv = document.getElementById('create-success');
+
+                errorDiv.style.display = 'none';
+                successDiv.style.display = 'none';
+
+                try {
+                    // Валидация JSON
+                    const jsonData = JSON.parse(textarea.value);
+
+                    const response = await fetch('/order', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(jsonData)
+                    });
+
+                    const responseStatus = response.status;
+                    const responseText = await response.text();
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error ${responseStatus}: ${responseText || 'Нет дополнительной информации'}`);
+                    }
+
+                    // Успешное создание
+                    successDiv.innerHTML = responseStatus === 201
+                        ? 'Заказ успешно создан!'
+                        : `Успешный ответ (${responseStatus})`;
+
+                    successDiv.style.display = 'block';
+                    textarea.value = '';
+
+                    // Дополнительная информация из ответа (если есть)
+                    if (responseText) {
+                        try {
+                            const result = JSON.parse(responseText);
+                            if (result.order_uid) {
+                                successDiv.innerHTML += `<br>UID: ${result.order_uid}`;
+                            }
+                        } catch {
+                            successDiv.innerHTML += `<br>Ответ сервера: ${responseText}`;
+                        }
+                    }
+
+                } catch (error) {
+                    errorDiv.innerText = `Ошибка: ${error.message.replace('JSON.parse:', '').trim()}`;
+                    errorDiv.style.display = 'block';
+                }
+            });
+        </script>
+
+        <script>
+            // Обработчик для формы удаления заказа
+            document.getElementById('deleteOrderForm').addEventListener('submit', async function (e) {
+                e.preventDefault();
+                const input = document.getElementById('deleteOrder');
+                const errorDiv = document.getElementById('delete-error');
+                const successDiv = document.getElementById('delete-success');
+
+                errorDiv.style.display = 'none';
+                successDiv.style.display = 'none';
+
+                const orderUID = input.value.trim();
+
+                if (!orderUID) {
+                    errorDiv.innerText = 'Пожалуйста, введите order_uid';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`/order/${orderUID}`, {
+                        method: 'DELETE'
+                    });
+
+                    const responseText = await response.text();
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error ${response.status}: ${responseText}`);
+                    }
+
+                    successDiv.innerText = `Заказ ${orderUID} успешно удален`;
+                    successDiv.style.display = 'block';
+                    input.value = '';
+
+                } catch (error) {
+                    errorDiv.innerText = `Ошибка: ${error.message}`;
+                    errorDiv.style.display = 'block';
+                }
+            });
+        </script>
+
+        <script>
+            // Оригинальный скрипт для левого окна
+            document.querySelector('.window:first-child form').addEventListener('submit', function (e) {
                 e.preventDefault();
                 const orderUid = document.querySelector('#orderUid').value.trim();
-                
+
                 if (!orderUid) {
                     document.querySelector('#error-message').innerText = 'Параметр order_uid обязателен';
                     document.querySelector('#error-message').style.display = 'block';
                     return;
                 }
-                
+
                 document.querySelector('#error-message').style.display = 'none';
                 window.location.href = `/order/${orderUid}`;
             });
@@ -121,5 +278,6 @@
                 window.location.href = '/orders';
             }
         </script>
-    </div>
 </body>
+
+</html>

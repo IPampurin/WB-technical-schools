@@ -47,17 +47,32 @@ func GetOrders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// маршалим даные в JSON с отступами для читаемости
-	resp, err := json.MarshalIndent(orders, "", "    ")
-	if err != nil {
-		log.Printf("Ошибка при маршалинге JSON: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	// создаем буфер для построения ответа
+	var buf bytes.Buffer
+	buf.WriteString("[\n") // Начало массива
+
+	for i, order := range orders {
+		// маршалим каждый заказ с отступами
+		orderJSON, err := json.MarshalIndent(order, "", "    ")
+		if err != nil {
+			log.Printf("Ошибка при маршалинге JSON: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		buf.Write(orderJSON)
+
+		// добавляем запятую и перенос для всех элементов, кроме последнего
+		if i < len(orders)-1 {
+			buf.WriteString(",\n\n\n")
+		}
 	}
+
+	buf.WriteString("\n]") // конец массива
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(resp)
+	buf.WriteTo(w)
 
 	log.Printf("Успешно получено %d заказов", len(orders))
 }
