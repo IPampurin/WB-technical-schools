@@ -1,4 +1,4 @@
-module produser
+module github.com/IPampurin/WB-technical-schools/L0/produser
 
 go 1.24.1
 
