@@ -26,7 +26,7 @@ func main() {
 		port = "8081"
 	}
 
-	apiURL := fmt.Sprintf("http://localhost:%d/order", port)
+	apiURL := fmt.Sprintf("http://localhost:%s/order", port)
 	httpClient := &http.Client{}
 
 	// ридер из кафки
@@ -62,7 +62,7 @@ func main() {
 					log.Printf("Сообщение успешно обработано: %s", m.Key)
 				}
 			} else {
-				log.Printf("Сообщение обработано, но статус ответа: %v", resp.StatusCode)
+				log.Printf("Сообщение обработано, статус ответа: %v", resp.StatusCode)
 			}
 		}
 

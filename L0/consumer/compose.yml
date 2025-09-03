@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    env_file:
+      - .env
     image: my-consumer  
     working_dir: /usr/src/app
     command: go run main.go

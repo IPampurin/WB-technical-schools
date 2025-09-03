@@ -15,23 +15,26 @@ import (
 
 const (
 	topic        = "my-topic-L0" // имя топика, в который пишем сообщения
-	countMessage = 1             // количество тестовых джасончиков
+	countMessage = 10000         // количество тестовых джасончиков
 )
 
 func main() {
 
+	// устанавливаем соединение с брокером
 	conn, err := kafka.DialLeader(context.Background(), "tcp", "localhost:9092", topic, 0)
 	if err != nil {
 		log.Fatalf("ошибка создания топика кафки: %v\n", err)
 	}
 	defer conn.Close()
 
+	// определяем продюсер
 	w := kafka.NewWriter(kafka.WriterConfig{
 		Brokers: []string{"localhost:9092"},
 		Topic:   topic,
 	})
 	defer w.Close()
 
+	// собираем и отправляем тестовые сообщения
 	messages := messageGenerate()
 
 	for i, msgBody := range messages {
@@ -41,13 +44,13 @@ func main() {
 			Time:  time.Now(),
 		}
 
+		// отправляем сообщения с дефолтным условием подтверждения получения от лидера
 		err := w.WriteMessages(context.Background(), msg)
 		if err != nil {
 			log.Printf("ошибка отправления сообщения в кафку '%s': %v\n", msgBody, err)
 		} else {
 			fmt.Printf("Отправленное в кафку сообщение: %s\n", string(msgBody))
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 
 	fmt.Println("Producer finished.")
