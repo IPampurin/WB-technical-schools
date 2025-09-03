@@ -41,21 +41,3 @@ func Consumer() {
 		}
 	}
 }
-
-// Заказ
-type Order struct {
-	OrderUID          string    `json:"order_uid" gorm:"unique_index;not null"`
-	TrackNumber       string    `json:"track_number" gorm:"index"`
-	Entry             string    `json:"entry"`
-	Delivery          Delivery  `json:"delivery" gorm:"foreignKey:OrderID"`
-	Payment           Payment   `json:"payment" gorm:"foreignKey:OrderID"`
-	Items             []Item    `json:"items" gorm:"foreignKey:OrderID"`
-	Locale            string    `json:"locale"`
-	InternalSignature string    `json:"internal_signature"`
-	CustomerID        string    `json:"customer_id"`
-	DeliveryService   string    `json:"delivery_service"`
-	Shardkey          string    `json:"shardkey"`
-	SMID              int       `json:"sm_id" gorm:"type:smallint"`
-	DateCreated       time.Time `json:"date_created" gorm:"type:timestamp;default:CURRENT_TIMESTAMP"`
-	OOFShard          string    `json:"oof_shard"`
-}
