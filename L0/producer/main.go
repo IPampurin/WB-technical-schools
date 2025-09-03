@@ -58,9 +58,9 @@ type Order struct {
 	OrderUID          string    `json:"order_uid" gorm:"unique_index;not null"`
 	TrackNumber       string    `json:"track_number" gorm:"index"`
 	Entry             string    `json:"entry"`
-	Delivery          Delivery  `json:"delivery" gorm:"foreignKey:OrderID"`
-	Payment           Payment   `json:"payment" gorm:"foreignKey:OrderID"`
-	Items             []Item    `json:"items" gorm:"foreignKey:OrderID"`
+	Delivery          *Delivery `json:"delivery" gorm:"foreignKey:OrderID"`
+	Payment           *Payment  `json:"payment" gorm:"foreignKey:OrderID"`
+	Items             []*Item   `json:"items" gorm:"foreignKey:OrderID"`
 	Locale            string    `json:"locale"`
 	InternalSignature string    `json:"internal_signature"`
 	CustomerID        string    `json:"customer_id"`
@@ -115,9 +115,9 @@ type Item struct {
 }
 
 // createDelivery выдаёт указатель на экземляр структуры Delivery
-func createDelivery() Delivery {
+func createDelivery() *Delivery {
 
-	delivery := Delivery{
+	delivery := &Delivery{
 		Name:    generateWord() + " " + generateWord(),                                         // string
 		Phone:   generatePhone(),                                                               // string
 		Zip:     strconv.Itoa(int(generateNumber(2639809))),                                    // string
@@ -131,12 +131,12 @@ func createDelivery() Delivery {
 }
 
 // createPayment выдаёт указатель на экземляр структуры Payment
-func createPayment() Payment {
+func createPayment() *Payment {
 
 	goodsTotal := generateNumber(317)    // придумываем цену
 	deliveryCost := generateNumber(1500) // придумываем цену доставки
 
-	payment := Payment{
+	payment := &Payment{
 		Transaction:  generateRid(),                     // string
 		RequestID:    "",                                // string
 		Currency:     "USD",                             // string
@@ -153,13 +153,13 @@ func createPayment() Payment {
 }
 
 // createItem выдаёт указатель на экземляр структуры Item
-func createItem() Item {
+func createItem() *Item {
 
 	price := generateNumber(10000)  // придумываем цену
 	sale := generateNumber(100)     // придумываем скидку
 	size := int(generateNumber(60)) // придумываем размер
 
-	item := Item{
+	item := &Item{
 		ChrtID:      int(generateNumber(9934930)),          // int
 		TrackNumber: "WBILMTESTTRACK",                      // const
 		Price:       price,                                 // float64
@@ -243,26 +243,32 @@ func messageGenerate() [][]byte {
 
 	testMsg := make([][]byte, countMessage, countMessage)
 
+	var order *Order
+
 	for i := 0; i < len(testMsg); i++ {
 
-		order := &Order{
-			OrderUID:          createPayment().Transaction, // string
-			TrackNumber:       "WBILMTESTTRACK",            // string
-			Entry:             "WBIL",                      // string
-			Delivery:          createDelivery(),            // Delivery
-			Payment:           createPayment(),             // Payment
-			Items:             []Item{createItem()},        // []Item
-			Locale:            "en",                        // string
-			InternalSignature: "",                          // string
-			CustomerID:        "test",                      // string
-			DeliveryService:   "meest",                     // string
-			Shardkey:          strconv.Itoa(rand.Intn(9)),  // string
-			SMID:              int(rand.Intn(99)),          // int
-			DateCreated:       time.Now().UTC(),            // time.Time
-			OOFShard:          strconv.Itoa(rand.Intn(2)),  // string
+		delivery := createDelivery()
+		payment := createPayment()
+		item := createItem()
+
+		order = &Order{
+			OrderUID:          payment.Transaction,        // string
+			TrackNumber:       "WBILMTESTTRACK",           // string
+			Entry:             "WBIL",                     // string
+			Delivery:          delivery,                   // Delivery
+			Payment:           payment,                    // Payment
+			Items:             []*Item{item},              // []Item. Возьмём один единственный товар, чтобы не заморачиваться
+			Locale:            "en",                       // string
+			InternalSignature: "",                         // string
+			CustomerID:        "test",                     // string
+			DeliveryService:   "meest",                    // string
+			Shardkey:          strconv.Itoa(rand.Intn(9)), // string
+			SMID:              rand.Intn(99),              // int
+			DateCreated:       time.Now().UTC(),           // time.Time
+			OOFShard:          strconv.Itoa(rand.Intn(2)), // string
 		}
 
-		orderInByte, err := json.Marshal(*order) // превращаем экземпляр order в []byte
+		orderInByte, err := json.Marshal(order) // превращаем экземпляр order в []byte
 		if err != nil {
 			continue // тут ошибка нам не интересна - просто пропустим досадную неожиданность
 		}
