@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/segmentio/kafka-go"
@@ -18,6 +19,17 @@ const (
 
 func main() {
 
+	// организуем клиента для отправки вычитанных из кафки сообщений на api сервиса
+	// по умолчанию порт хоста 8081 (доступ в браузере на localhost:8081)
+	port, ok := os.LookupEnv("L0_PORT")
+	if !ok {
+		port = "8081"
+	}
+
+	apiURL := fmt.Sprintf("http://localhost:%d/order", port)
+	httpClient := &http.Client{}
+
+	// ридер из кафки
 	r := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:  []string{"localhost:9092"},
 		Topic:    topic,
@@ -27,12 +39,8 @@ func main() {
 	})
 	defer r.Close()
 
-	httpClient := &http.Client{}
-	apiURL := "http://localhost:8081/order" // URL сервера
-
-	fmt.Printf("Консьюмер подписан на топик '%s' в группе '%s'\n\n", topic, groupID)
-
-	fmt.Println("начинаем вычитывать !!!")
+	log.Printf("Консуюмер подписан на топик '%s' в группе '%s'\n", topic, groupID)
+	log.Println("Начинаем вычитывать !!!")
 
 	ctx := context.Background()
 	for {
@@ -42,23 +50,20 @@ func main() {
 			continue
 		}
 
-		// Отправка сообщения через HTTP POST
-		resp, err := httpClient.Post(
-			apiURL,
-			"application/json",
-			bytes.NewReader(m.Value),
-		)
-
-		fmt.Printf("%s: %s\n\n", string(m.Key), string(m.Value))
-
-		if err == nil && resp.StatusCode == http.StatusOK {
-			if err := r.CommitMessages(ctx, m); err != nil {
-				log.Fatal("failed to commit messages:", err)
-			} else {
-				log.Printf("Сообщение успешно обработано: %s", m.Key)
-			}
+		// отправляем сообщения через HTTP POST
+		resp, err := httpClient.Post(apiURL, "application/json", bytes.NewReader(m.Value))
+		if err != nil {
+			log.Printf("Сетевая ошибка: %v", err)
 		} else {
-			log.Printf("Ошибка обработки: %v", err)
+			if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusConflict { // статусы 200 = ок и 409 = дубль
+				if err := r.CommitMessages(ctx, m); err != nil {
+					log.Fatal("failed to commit messages:", err)
+				} else {
+					log.Printf("Сообщение успешно обработано: %s", m.Key)
+				}
+			} else {
+				log.Printf("Сообщение обработано, но статус ответа: %v", resp.StatusCode)
+			}
 		}
 
 		if resp != nil {
@@ -66,43 +71,3 @@ func main() {
 		}
 	}
 }
-
-/*
-
-// consumer/main.go
-func main() {
-    // ... (инициализация ридера Kafka)
-
-    httpClient := &http.Client{Timeout: 5 * time.Second}
-    apiURL := "http://localhost:8081/order" // URL сервера
-
-    for {
-        m, err := r.FetchMessage(ctx)
-        if err != nil {
-            log.Printf("Ошибка чтения: %v", err)
-            continue
-        }
-
-        // Отправка сообщения через HTTP POST
-        resp, err := httpClient.Post(
-            apiURL,
-            "application/json",
-            bytes.NewReader(m.Value),
-        )
-
-        if err == nil && resp.StatusCode == http.StatusOK {
-            // Коммит только при успешной обработке
-            r.CommitMessages(ctx, m)
-            log.Printf("Сообщение успешно обработано: %s", m.Key)
-        } else {
-            log.Printf("Ошибка обработки: %v", err)
-        }
-
-        if resp != nil {
-            resp.Body.Close()
-        }
-    }
-}
-
-
-*/

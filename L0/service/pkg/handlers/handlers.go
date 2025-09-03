@@ -14,67 +14,71 @@ import (
 	"gorm.io/gorm"
 )
 
-// GetOrders выводит список всех заказов с учётом параметров пагинации
+// GetOrders выводит список всех заказов с учётом параметров пагинации и общим количеством
 func GetOrders(w http.ResponseWriter, r *http.Request) {
 
 	// инициализируем переменные для пагинации
-	page := r.URL.Query().Get("page")
-	limit := r.URL.Query().Get("limit")
+	pageStr := r.URL.Query().Get("page")
+	limitStr := r.URL.Query().Get("limit")
+
+	// значения по умолчанию
+	page := 1
+	limit := 10
 
 	// если в параметрах запроса нет лимитов вывода данных,
 	// установим значения по умолчанию
-	pageSize := 10
-	if page != "" {
-		pageSize, _ = strconv.Atoi(page)
+	if pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
 	}
-	limitSize := 50
-	if limit != "" {
-		limitSize, _ = strconv.Atoi(limit)
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
 	}
 
-	var orders []models.Order // слайс для хранения заказов
-
-	// создаём запрос к базе данных с учётом связанных данных
-	query := db.DB.Db.Preload("Delivery").Preload("Payment").Preload("Items").Find(&orders)
-
-	// применим пагинацию
-	query = query.Offset((pageSize - 1) * limitSize).Limit(limitSize)
-
-	// выполнение запроса
-	if query.Error != nil {
-		log.Printf("Ошибка при получении заказов: %v", query.Error)
-		http.Error(w, query.Error.Error(), http.StatusBadRequest)
+	// получаем общее количество заказов
+	var total int64
+	if err := db.DB.Db.Model(&models.Order{}).Count(&total).Error; err != nil {
+		log.Printf("Ошибка при получении общего количества заказов: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
-	// создаем буфер для построения ответа
-	var buf bytes.Buffer
-	buf.WriteString("[\n") // Начало массива
+	// получаем заказы с учётом пагинации
+	var orders []models.Order
+	query := db.DB.Db.Preload("Delivery").Preload("Payment").Preload("Items").Offset((page - 1) * limit).Limit(limit)
 
-	for i, order := range orders {
-		// маршалим каждый заказ с отступами
-		orderJSON, err := json.MarshalIndent(order, "", "    ")
-		if err != nil {
-			log.Printf("Ошибка при маршалинге JSON: %v", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		buf.Write(orderJSON)
-
-		// добавляем запятую и перенос для всех элементов, кроме последнего
-		if i < len(orders)-1 {
-			buf.WriteString(",\n\n\n")
-		}
+	if err := query.Find(&orders).Error; err != nil {
+		log.Printf("Ошибка при получении заказов: %v", err)
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
 	}
 
-	buf.WriteString("\n]") // конец массива
+	// формируем ответ
+	response := struct {
+		Total  int64          `json:"Всего заказов"`
+		Page   int            `json:"Страниц для показа"`
+		Limit  int            `json:"Показывать на странице по"`
+		Orders []models.Order `json:"Данные заказов"`
+	}{
+		Total:  total,
+		Page:   page,
+		Limit:  limit,
+		Orders: orders,
+	}
 
+	// Сериализация ответа
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	buf.WriteTo(w)
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "    ") // добавляем отступы для читаемости
+	if err := encoder.Encode(response); err != nil {
+		log.Printf("Ошибка при формировании ответа: %v", err)
+	}
 
-	log.Printf("Успешно получено %d заказов", len(orders))
+	log.Printf("Успешно возвращено %d/%d заказов", len(orders), total)
 }
 
 // PostOrder принимает json с информацией о заказе и сохраняет данные в базе
@@ -100,6 +104,20 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 	if ok, message := validateOrder(order); !ok {
 		log.Printf("Получены некорректные данные: %v", message)
 		http.Error(w, "некорректные данные - не будем сохранять", http.StatusBadRequest)
+		return
+	}
+
+	// проверяем, существует ли уже заказ с таким OrderUID
+	var existingOrder models.Order
+
+	if err := db.DB.Db.Where("order_uid = ?", order.OrderUID).First(&existingOrder).Error; err == nil {
+		log.Printf("Попытка добавить дубликат заказа: OrderUID=%s", order.OrderUID)
+		http.Error(w, "заказ с таким OrderUID уже существует", http.StatusConflict)
+		return
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		// обрабатываем ошибки, кроме "не найдено"
+		log.Printf("Ошибка проверки дубликата: %v", err)
+		http.Error(w, "внутренняя ошибка сервера", http.StatusInternalServerError)
 		return
 	}
 
