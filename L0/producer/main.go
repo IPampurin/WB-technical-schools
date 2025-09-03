@@ -15,7 +15,7 @@ import (
 
 const (
 	topic        = "my-topic-L0" // имя топика, в который пишем сообщения
-	countMessage = 3             // количество тестовых джасончиков
+	countMessage = 1             // количество тестовых джасончиков
 )
 
 func main() {

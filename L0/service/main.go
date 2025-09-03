@@ -26,9 +26,6 @@ func main() {
 	}
 	defer db.CloseDB()
 
-	// запускаем консумер
-	//cons.Consumer()
-
 	// запускаем сервер
 	err = server.Run()
 	if err != nil {
