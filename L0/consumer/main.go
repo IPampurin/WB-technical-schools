@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	topic   = "my-topic-L0"
-	groupID = "my-groupID"
+	topic   = "my-topic-L0" // имя топика коррелируется с продюсером
+	groupID = "my-groupID"  // произвольное в нашем случае имя группы
 )
 
 func main() {
@@ -50,7 +50,7 @@ func main() {
 			continue
 		}
 
-		// отправляем сообщения через HTTP POST
+		// отправляем сообщения через HTTP POST на api приложения
 		resp, err := httpClient.Post(apiURL, "application/json", bytes.NewReader(m.Value))
 		if err != nil {
 			log.Printf("Сетевая ошибка: %v", err)
@@ -62,7 +62,7 @@ func main() {
 					log.Printf("Сообщение успешно обработано: %s", m.Key)
 				}
 			} else {
-				log.Printf("Сообщение обработано, статус ответа: %v", resp.StatusCode)
+				log.Printf("Сообщение обработано, статус ответа: %v", resp.StatusCode) // статус 201 = создана запись
 			}
 		}
 
