@@ -1,0 +1,13 @@
+version: '3'
+
+services:
+  go-consumer:  
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: my-consumer  
+    working_dir: /usr/src/app
+    command: go run main.go
+    volumes:
+      - ./:/usr/src/app
+    network_mode: "host"
