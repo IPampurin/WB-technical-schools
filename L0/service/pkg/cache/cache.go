@@ -19,6 +19,7 @@ var Rdb *redis.Client // клиент Redis
 // InitRedis запускает работу с Redis
 func InitRedis() error {
 
+	// смотрим переменные окружения
 	portRedis, ok := os.LookupEnv("REDIS_PORT")
 	if !ok {
 		portRedis = "6379"
@@ -31,35 +32,34 @@ func InitRedis() error {
 	if !ok {
 		passwordRedis = ""
 	}
-	ttlStr, ok := os.LookupEnv("REDIS_TTL")
-	if !ok {
-		ttlStr = "600"
-	}
 
-	// переведём в int номер базы в Redis и время жизни данных
+	// переведём в int номер базы в Redis
 	dbRedis, err := strconv.Atoi(dbRedisStr)
-	if err != nil {
+	if err != nil || dbRedis < 0 || dbRedis > 16 {
 		log.Printf("проверьте .env файл, ошибка назначения базы данных Redis: %v\n", err)
 		return err
 	}
-	ttl, err := strconv.Atoi(ttlStr)
-	if err != nil {
-		log.Printf("проверьте .env файл, ошибка назначения времени жизни данных в Redis: %v\n", err)
-		return err
-	}
+
+	// узнаем время жизни данных в кэше
+	ttl := GetTTL()
 
 	// заводим клиента Redis
 	Rdb = redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%s", "localhost", portRedis),
+		Addr:     fmt.Sprintf("%s:%s", "redis", portRedis),
 		Password: passwordRedis,
 		DB:       dbRedis,
 	})
+
+	log.Println("Клиент Redis запущен.")
 
 	// проверяем подключение
 	if err = Rdb.Ping(context.Background()).Err(); err != nil {
 		log.Printf("ошибка подключения к Redis: %v\n", err)
 		return err
 	}
+
+	log.Println("Подключение к Redis есть.")
+	log.Println("Начинаем загрузку первичных данных в кэш.")
 
 	// загружаем начальные данные
 	err = loadDataToCache(time.Duration(ttl) * time.Second)
@@ -68,15 +68,38 @@ func InitRedis() error {
 		return err
 	}
 
+	log.Println("Загрузка первичных данных в кэш завершена.")
+
 	return nil
 }
 
-// loadDataToCache загружает данные за крайние 24 часа в кэш при старте
+// GetTTL определяет время жизни данных в кэше
+func GetTTL() time.Duration {
+
+	// смотрим переменную окружения
+	ttlStr, ok := os.LookupEnv("REDIS_TTL")
+	if !ok {
+		ttlStr = "600" // по умолчанию примем 10 минут
+	}
+
+	ttl, err := strconv.Atoi(ttlStr)
+	if err != nil || ttl < 0 {
+		log.Printf("Проверьте .env файл, ошибка назначения времени жизни данных в Redis. Используется значение по умолчанию.")
+		return 600 * time.Second
+	}
+
+	return time.Duration(ttl) * time.Second
+}
+
+// loadDataToCache загружает данные за последнее время в кэш при старте
 func loadDataToCache(ttl time.Duration) error {
 
-	timeThreshold := time.Now().Add(-24 * time.Hour) // временной порог 24 часа
+	// по умочанию установим временной порог, например, 24 часа
+	threshold := 24
 
-	// получаем заказы за крайние 24 часа
+	timeThreshold := time.Now().Add(-time.Duration(threshold) * time.Hour)
+
+	// получаем заказы до установленного порога
 	var orders []models.Order
 	err := db.DB.Db.
 		Preload("Delivery").
@@ -88,7 +111,7 @@ func loadDataToCache(ttl time.Duration) error {
 		return fmt.Errorf("ошибка при получении заказов: %v", err)
 	}
 
-	log.Printf("Найдено %d заказов за последние 24 часа", len(orders))
+	log.Printf("Найдено %d заказов за последние %v часа", len(orders), threshold)
 
 	// сохраняем данные в redis
 	for _, order := range orders {
