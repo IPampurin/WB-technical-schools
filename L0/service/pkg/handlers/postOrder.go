@@ -8,12 +8,11 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/cache"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/models"
-	"github.com/go-redis/redis"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -53,7 +52,7 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Заказ с OrderUID=%s не найден в кэше. Проверяем в базе.", order.OrderUID)
 	}
 
-	// проверяем, существует ли уже заказ с таким OrderUID
+	// проверяем, существует ли уже заказ с таким OrderUID в базе
 	var existingOrder models.Order
 
 	if err := db.DB.Db.Where("order_uid = ?", order.OrderUID).First(&existingOrder).Error; err == nil {
@@ -99,11 +98,10 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//
-	ttl := time.Duration(cache.GetTTL()) * time.Second // Добавьте метод GetTTL в ваш cache пакет
+	// сохраняем данные в кэше с учётом TTL
+	ttl := cache.GetTTL()
 	if err := cache.SetCahe(cacheKey, order, ttl); err != nil {
 		log.Printf("Ошибка кэширования заказа %s: %v", order.OrderUID, err)
-		// Не прерываем выполнение, только логируем ошибку
 	}
 
 	log.Println("Транзакция успешно завершена.")
