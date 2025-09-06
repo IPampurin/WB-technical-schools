@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/cache"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/server"
 	"github.com/joho/godotenv"
@@ -25,6 +26,12 @@ func main() {
 		return
 	}
 	defer db.CloseDB()
+
+	// инициализируем кэш
+	err = cache.InitRedis()
+	if err != nil {
+		fmt.Printf("кэш отвалился, ошибка вызова cache.InitRedis: %v\n", err)
+	}
 
 	// запускаем сервер
 	err = server.Run()

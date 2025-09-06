@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/models"
@@ -48,6 +49,7 @@ func GetOrders(w http.ResponseWriter, r *http.Request) {
 
 	// получаем заказы с учётом пагинации
 	var orders []models.Order
+
 	query := db.DB.Db.Preload("Delivery").Preload("Payment").Preload("Items").Offset((page - 1) * limit).Limit(limit)
 
 	if err := query.Find(&orders).Error; err != nil {
@@ -84,7 +86,7 @@ func GetOrders(w http.ResponseWriter, r *http.Request) {
 // PostOrder принимает json с информацией о заказе и сохраняет данные в базе
 func PostOrder(w http.ResponseWriter, r *http.Request) {
 
-	order := new(models.Order)
+	var order *models.Order
 	var buf bytes.Buffer
 
 	// читаем тело запроса
@@ -93,6 +95,9 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	// запоминаем  = buf.Bytes() в переменную
+	// newData := buf.Bytes()
 
 	// парсим json из запроса в структуру заказа
 	if err = json.Unmarshal(buf.Bytes(), &order); err != nil {
@@ -106,6 +111,13 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "некорректные данные - не будем сохранять", http.StatusBadRequest)
 		return
 	}
+
+	/* проверяем есть ли такой order_uid в кэше, если да, то дайм ответ
+	"log.Printf("Попытка добавить дубликат заказа: OrderUID=%s", order.OrderUID)
+	http.Error(w, "заказ с таким OrderUID уже существует", http.StatusConflict)
+	return",
+	если в кэше нет, то идём дальше
+	*/
 
 	// проверяем, существует ли уже заказ с таким OrderUID
 	var existingOrder models.Order
@@ -153,6 +165,10 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	/*
+	   сохраняем newData в кэше
+	*/
+
 	log.Println("Транзакция успешно завершена.")
 
 	// завершаем работу функции
@@ -177,6 +193,9 @@ func GetOrderByID(w http.ResponseWriter, r *http.Request) {
 	// создаем экземпляр заказа
 	var order models.Order
 
+	/*
+	   проверяем есть ли такой заказ в кэше и если нет, то
+	*/
 	// получаем заказ из базы данных
 	result := db.DB.Db.First(&order, "order_uid = ?", orderUID)
 	if result.Error != nil {
@@ -189,6 +208,12 @@ func GetOrderByID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Ошибка при получении заказа", http.StatusInternalServerError)
 		return
 	}
+
+	/*
+		а если заказ был кэше, то дальше оперируем слайсом байт из кэша:
+		размаршалливаем его в order (?) и
+
+	*/
 
 	// маршалим даные в JSON с отступами для читаемости
 	resp, err := json.MarshalIndent(order, "", "    ")
@@ -255,6 +280,10 @@ func DeleteOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	/*
+		если данный заказ засветился в кэше, удаляем его из кэша
+	*/
+
 	// удаляем сам заказ
 	result = session.Delete(&order)
 	if result.Error != nil {
@@ -300,8 +329,8 @@ func validateOrder(order *models.Order) (bool, string) {
 		order.Delivery.City == "" ||
 		order.Delivery.Address == "" ||
 		order.Delivery.Region == "" ||
-		order.Delivery.Email == "" {
-		return false, "Поля delivery должны быть заполнены."
+		order.Delivery.Email == "" || len(strings.Split(order.Delivery.Email, "@")) != 2 {
+		return false, "Поля delivery должны быть заполнены, да ещё и корректно."
 	}
 
 	// валидация Payment
