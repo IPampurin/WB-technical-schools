@@ -2,12 +2,15 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 
+	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/cache"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/models"
 	"github.com/go-chi/chi/v5"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -19,7 +22,7 @@ func DeleteOrder(w http.ResponseWriter, r *http.Request) {
 	orderUID := chi.URLParam(r, "order_uid")
 
 	if orderUID == "" {
-		log.Printf("Ошибка: order_uid не указан")
+		log.Printf("Ошибка запроса удаления заказа: order_uid не указан")
 		http.Error(w, "Параметр order_uid обязателен", http.StatusBadRequest)
 		return
 	}
@@ -60,10 +63,6 @@ func DeleteOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	/*
-		если данный заказ засветился в кэше, удаляем его из кэша
-	*/
-
 	// удаляем сам заказ
 	result = session.Delete(&order)
 	if result.Error != nil {
@@ -82,6 +81,14 @@ func DeleteOrder(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("Транзакция успешно завершена.")
 	log.Printf("Заказ с UID %s успешно удален", orderUID)
+
+	// если данный заказ засветился в кэше, срочно удаляем его и оттудова
+	cacheKey := fmt.Sprintf("order:%s", orderUID)
+	if err := cache.DelCache(cacheKey); err != nil && !errors.Is(err, redis.Nil) {
+		log.Printf("Ошибка удаления из кэша после удаления заказа из базы: %v", err)
+	}
+
+	log.Printf("Заказ с UID %s успешно удален из кэша", orderUID)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNoContent)
