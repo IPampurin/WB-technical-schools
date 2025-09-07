@@ -21,7 +21,7 @@ func GetOrders(w http.ResponseWriter, r *http.Request) {
 	page := 1
 	limit := 10
 
-	// если в параметрах запроса нет лимитов вывода данных,
+	// если в параметрах запроса нет лимитов вывода данных (http://localhost:8081/orders?page=1&limit=10),
 	// установим значения по умолчанию
 	if pageStr != "" {
 		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {

@@ -3,9 +3,11 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 
+	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/cache"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/models"
 	"github.com/go-chi/chi/v5"
@@ -26,35 +28,60 @@ func GetOrderByID(w http.ResponseWriter, r *http.Request) {
 
 	// создаем экземпляр заказа
 	var order models.Order
+	// создаём экземпляр для ответа
+	var resp []byte
 
-	/*
-	   проверяем есть ли такой заказ в кэше и если нет, то
-	*/
-	// получаем заказ из базы данных
-	result := db.DB.Db.First(&order, "order_uid = ?", orderUID)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			log.Printf("Заказ с UID %s не найден", orderUID)
-			http.Error(w, "Заказ не найден", http.StatusNotFound)
+	// проверяем есть ли такой заказ в кэше
+	cacheKey := fmt.Sprintf("order:%s", orderUID)
+	// если данные в кэше есть
+	if jsonData, err := cache.GetCache(cacheKey); err == nil {
+		// если данные не корректные
+		if err = json.Unmarshal(jsonData, &order); err != nil {
+			log.Printf("Битые данные в кэше: %s. Удаляем ключ.", cacheKey)
+			// убираем мусор
+			cache.DelCache(cacheKey)
+		} else {
+			// если данные корректные
+			// маршалим даные в JSON с отступами для читаемости
+			resp, err = json.MarshalIndent(order, "", "    ")
+			if err != nil {
+				log.Printf("Ошибка при маршалинге данных: %v", err)
+				http.Error(w, "Ошибка при формировании ответа", http.StatusInternalServerError)
+				return
+			}
+			log.Printf("Заказ с UID %s успешно найден в кэше", orderUID)
+		}
+	} else {
+		// если данных в кэше нет,
+		// то получаем заказ из базы данных
+		result := db.DB.Db.First(&order, "order_uid = ?", orderUID)
+		// если что-то не так
+		if result.Error != nil {
+			// если просто такого заказа нет
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				log.Printf("Заказ с UID %s не найден", orderUID)
+				http.Error(w, "Заказ не найден", http.StatusNotFound)
+				return
+			}
+			// если что-то невообразимое
+			log.Printf("Ошибка при получении заказа: %v", result.Error)
+			http.Error(w, "Ошибка при получении заказа", http.StatusInternalServerError)
 			return
 		}
-		log.Printf("Ошибка при получении заказа: %v", result.Error)
-		http.Error(w, "Ошибка при получении заказа", http.StatusInternalServerError)
-		return
-	}
+		// если заказ в базе есть и штатно получен, то записываем заказ в кэш
+		if err := cache.SetCahe(cacheKey, order, cache.GetTTL()); err != nil {
+			log.Printf("Ошибка кэширования при запросе по uid: %v", err)
+		}
 
-	/*
-		а если заказ был кэше, то дальше оперируем слайсом байт из кэша:
-		размаршалливаем его в order (?) и
+		log.Printf("Заказ с UID %s найден в БД и занесён в кэш", orderUID)
 
-	*/
-
-	// маршалим даные в JSON с отступами для читаемости
-	resp, err := json.MarshalIndent(order, "", "    ")
-	if err != nil {
-		log.Printf("Ошибка при маршалинге данных: %v", err)
-		http.Error(w, "Ошибка при формировании ответа", http.StatusInternalServerError)
-		return
+		// и возвращаем читабельный ответ
+		resp, err = json.MarshalIndent(order, "", "    ")
+		if err != nil {
+			log.Printf("Ошибка при маршалинге данных: %v", err)
+			http.Error(w, "Ошибка при формировании ответа", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// формируем ответ
