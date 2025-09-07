@@ -15,7 +15,7 @@ import (
 
 const (
 	topic        = "my-topic-L0" // имя топика, в который пишем сообщения
-	countMessage = 50            // количество тестовых джасончиков
+	countMessage = 10            // количество тестовых джасончиков
 )
 
 func main() {
@@ -27,15 +27,22 @@ func main() {
 	}
 	defer conn.Close()
 
+	log.Println("Соединение с брокером установлено.")
+
 	// определяем продюсер
 	w := kafka.NewWriter(kafka.WriterConfig{
-		Brokers: []string{"localhost:9092"},
-		Topic:   topic,
+		Brokers: []string{"localhost:9092"}, // список брокеров
+		Topic:   topic,                      // имя топика, в который будем слать сообщения
+		// RequiredAcks: kafka.WaitForLocal	// по умолчанию лидер в кафке подтверждает получение сообщения
 	})
 	defer w.Close()
 
+	log.Println("Начинаем генерировать тестовые данные.")
+
 	// собираем и отправляем тестовые сообщения
 	messages := messageGenerate()
+
+	log.Println("Начинаем отправку тестовых данных.")
 
 	for i, msgBody := range messages {
 		msg := kafka.Message{
@@ -44,7 +51,7 @@ func main() {
 			Time:  time.Now(),
 		}
 
-		// отправляем сообщения с дефолтным условием подтверждения получения от лидера
+		// отправляем сообщения (по дефолту лидер в кафке подтверждает получение сообщения)
 		err := w.WriteMessages(context.Background(), msg)
 		if err != nil {
 			log.Printf("ошибка отправления сообщения в кафку '%s': %v\n", msgBody, err)
@@ -53,7 +60,7 @@ func main() {
 		}
 	}
 
-	fmt.Println("Producer finished.")
+	log.Println("Продюсер отправил тестовые сообщения.")
 }
 
 // Заказ
@@ -199,7 +206,7 @@ func generateWord() string {
 		randomIndex := rand.Intn(len(letters))
 		randomLetter := rune(letters[randomIndex])
 		if i == 0 {
-			randomLetter = unicode.ToUpper(randomLetter) // если буква не первая, меняем регистр
+			randomLetter = unicode.ToUpper(randomLetter) // если буква первая, меняем регистр
 		}
 		word = append(word, randomLetter)
 	}
@@ -268,7 +275,7 @@ func messageGenerate() [][]byte {
 			Shardkey:          strconv.Itoa(rand.Intn(9)), // string
 			SMID:              rand.Intn(99),              // int
 			DateCreated:       time.Now().UTC(),           // time.Time
-			OOFShard:          strconv.Itoa(rand.Intn(2)), // string
+			OOFShard:          strconv.Itoa(rand.Intn(5)), // string
 		}
 
 		orderInByte, err := json.Marshal(order) // превращаем экземпляр order в []byte
