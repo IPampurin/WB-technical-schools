@@ -35,7 +35,7 @@ func main() {
 	defer w.Close()
 
 	// собираем и отправляем тестовые сообщения
-	messages := messageGenerate()
+	messages := messageGenerate(countMessage)
 
 	for i, msgBody := range messages {
 		msg := kafka.Message{
@@ -53,7 +53,7 @@ func main() {
 		}
 	}
 
-	fmt.Println("Producer finished.")
+	fmt.Println("Продюсер закончил работу.")
 }
 
 // Заказ
@@ -242,9 +242,9 @@ func generatePhone() string {
 }
 
 // messageGenerate организует псевдослучайные данные для передачи брокеру
-func messageGenerate() [][]byte {
+func messageGenerate(count int) [][]byte {
 
-	testMsg := make([][]byte, countMessage, countMessage)
+	testMsg := make([][]byte, count, count)
 
 	var order *Order
 
