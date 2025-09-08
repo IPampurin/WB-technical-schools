@@ -40,7 +40,7 @@ func main() {
 	log.Println("Начинаем генерировать тестовые данные.")
 
 	// собираем и отправляем тестовые сообщения
-	messages := messageGenerate()
+	messages := messageGenerate(countMessage)
 
 	log.Println("Начинаем отправку тестовых данных.")
 
@@ -60,7 +60,11 @@ func main() {
 		}
 	}
 
+<<<<<<< HEAD
 	log.Println("Продюсер отправил тестовые сообщения.")
+=======
+	fmt.Println("Продюсер закончил работу.")
+>>>>>>> levelZero
 }
 
 // Заказ
@@ -249,9 +253,9 @@ func generatePhone() string {
 }
 
 // messageGenerate организует псевдослучайные данные для передачи брокеру
-func messageGenerate() [][]byte {
+func messageGenerate(count int) [][]byte {
 
-	testMsg := make([][]byte, countMessage, countMessage)
+	testMsg := make([][]byte, count, count)
 
 	var order *Order
 
