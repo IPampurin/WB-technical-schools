@@ -12,7 +12,7 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-const (
+var (
 	topic   = "my-topic-L0" // имя топика коррелируется с продюсером
 	groupID = "my-groupID"  // произвольное в нашем случае имя группы
 )

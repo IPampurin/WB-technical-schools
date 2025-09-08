@@ -13,7 +13,7 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-const (
+var (
 	topic        = "my-topic-L0" // имя топика, в который пишем сообщения
 	countMessage = 10            // количество тестовых джасончиков
 )
