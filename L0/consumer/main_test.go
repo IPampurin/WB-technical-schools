@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestConsumerRead тестирует базовое чтение сообщений из кафки
 func TestConsumerRead(t *testing.T) {
 
 	// задаём начальные условия
@@ -91,12 +92,14 @@ func TestConsumerRead(t *testing.T) {
 
 }
 
+// TestConsumerAPIIntegration тестирует интеграцию с API
 func TestConsumerAPIIntegration(t *testing.T) {
 
 	// задаём начальные условия и тестовые данные
 	testTopic := "test-api-topic"
 	testGroupID := "test-api-group"
 	brokerAddr := "localhost:9092"
+	testTimeLimitConsumer := "15"
 	testMessages := []string{
 		`{"id":1,"data":"test1"}`,
 		`{"id":2,"data":"test2"}`,
@@ -112,12 +115,14 @@ func TestConsumerAPIIntegration(t *testing.T) {
 	originTopic := topic
 	originGroupID := groupID
 	originPort := os.Getenv("L0_PORT")
+	originTimeLimitConsumer := os.Getenv("TIME_LIMIT_CONSUMER_L0")
 
-	// настраиваем Cleanup
+	// настраиваем Cleanup для возврата подмены настроек окружения
 	t.Cleanup(func() {
 		topic = originTopic
 		groupID = originGroupID
 		os.Setenv("L0_PORT", originPort)
+		os.Setenv("TIME_LIMIT_CONSUMER_L0", originTimeLimitConsumer)
 
 		// удаляем тестовый топик
 		conn, err := kafka.Dial("tcp", brokerAddr)
@@ -145,17 +150,12 @@ func TestConsumerAPIIntegration(t *testing.T) {
 	topic = testTopic
 	groupID = testGroupID
 	os.Setenv("L0_PORT", testPort) // используем порт тестового сервера
+	os.Setenv("TIME_LIMIT_CONSUMER_L0", testTimeLimitConsumer)
 
-	// запускаем консюмер на 15 секунд
+	// запускаем консюмер на testTimeLimitConsumer = 15 секунд
 	go func() {
-		_, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		time.AfterFunc(15*time.Second, cancel)
 		main()
 	}()
-
-	// ждём инициализации
-	time.Sleep(3 * time.Second)
 
 	// отправляем сообщения
 	writer := kafka.NewWriter(kafka.WriterConfig{
