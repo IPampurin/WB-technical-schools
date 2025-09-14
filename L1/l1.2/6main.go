@@ -15,11 +15,11 @@ func main() {
 	// создаём канал, из которого будем забирать квадраты чисел
 	resChan := make(chan int, len(input))
 
-	// запускаем len(input) горутин (пул воркеров)
+	// запускаем len(input) горутин
 	for i := 0; i < len(input); i++ {
 		go func(jobs <-chan int, res chan<- int) {
-			for v := range jobs {
-				res <- v * v
+			for v := range jobs { // в горутине слушаем канал jobs
+				res <- v * v // и шлём в канал res квадрат числа из jobs
 			}
 		}(jobChan, resChan)
 	}
