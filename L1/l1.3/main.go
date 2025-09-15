@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -22,13 +23,16 @@ func worker(ch chan any) {
 
 func main() {
 
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
 	in := make(chan any, n)
 
-	go func() {
+	go func(ctx context.Context) {
 		for i := 0; i < 10; i++ {
 			in <- i
 		}
-	}()
+	}(ctx)
 
 	for i := 0; i < n; i++ {
 		go worker(in)
