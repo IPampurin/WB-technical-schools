@@ -1,60 +1,55 @@
-/* ВАРИАНТ №2 - решение с применением паттерна на основе канала done */
+/* ВАРИАНТ №2 - базовая реализация с бесконечной записью, остановкой по Ctrl + C и утечкой горутин */
+
+/*
+Примечание: решение согласно заданию, но стоит отметить, что если мы запустим программу, то через
+			какое-то время, вероятно, возникнет желание её остановить, для чего придётся воспользоваться
+			сочетанием Ctrl + C и в результате такой остановки процесса мы получим то, что называется утечкой горутин.
+*/
 
 package main
 
 import (
 	"fmt"
 	"sync"
-	"time"
 )
 
-const (
-	n         = 5 // необходимое количество воркеров
-	limitTime = 3 // время выдачи данных в секундах
-)
+const n = 5 // необходимое количество воркеров
 
 // worker печатает в консоль значение, полученное из канала
-func worker(ch chan any, done chan struct{}, wg sync.WaitGroup) {
+func worker(ch chan int, wg *sync.WaitGroup) {
 
+	// вычитаем счётчик WaitGroup в любом случае
 	defer wg.Done()
 
-	for {
-		// постоянно слушаем два канала
-		select {
-		case v, ok := <-ch: // и если основной канал не закрыт, печатаем то, что пришло
-			if !ok {
-				return // если канал закрыт, завершаем работу
-			}
-			fmt.Println(v)
-		case <-done:
-			return // при получении сигнала по каналу отмены завершаем worker
-		}
+	// слушаем канал и печатаем то, что пришло
+	for v := range ch {
+		fmt.Println(v)
 	}
 }
 
 func main() {
 
+	// организуем счётчик WaitGroup
 	var wg sync.WaitGroup
 
-	done := make(chan struct{})
-	in := make(chan any, n)
+	// in канал для записи чисел
+	in := make(chan int, n)
 
+	// запускаем воркеры
 	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go worker(in, done, wg)
+		wg.Add(1) // прибавляем счётчик
+		go worker(in, &wg)
 	}
 
 	number := 0
 
+	// бесконечно шлём числа в in
 	for {
-		select {
-		case in <- number:
-			number++
-		case <-time.After(limitTime * time.Second):
-			close(done)
-			close(in)
-			break
-		}
+		in <- number
+		number++
 	}
 
+	// код ниже никогда не выполнится
+	close(in) // закрываем канал
+	wg.Wait() // ждём завершения горутин
 }
