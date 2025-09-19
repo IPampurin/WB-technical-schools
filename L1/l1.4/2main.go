@@ -1,17 +1,17 @@
-/* ВАРИАНТ №5 - решение с приёмом параметра и graceful shutdown по нажатию Ctrl + C (запуск: go run 5main.go --workers 'X') */
+/* ВАРИАНТ №2 - решение с применением context и остановкой программы по Ctrl + C */
 
 package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 )
+
+const n = 5 // количество горутин-воркеров
 
 // worker печатает в консоль значение, полученное из канала
 func worker(ctx context.Context, ch chan int, wg *sync.WaitGroup) {
@@ -34,15 +34,6 @@ func worker(ctx context.Context, ch chan int, wg *sync.WaitGroup) {
 
 func main() {
 
-	// определяем количество запускаемых при запуске программы воркеров
-	// по умолчанию воркеров будет 4
-	countWorkers := flag.Int("workers", 4, "count of workers")
-	flag.Parse()
-
-	if *countWorkers <= 0 {
-		log.Fatal("Количество воркеров должно быть больше ноля.")
-	}
-
 	// для корректного завершения работы воркеров определяем контекст
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -50,30 +41,27 @@ func main() {
 	// организуем WaitGroup
 	var wg sync.WaitGroup
 
-	in := make(chan int, *countWorkers) // канал для передачи данных
+	in := make(chan int, n)            // канал для передачи данных
+	sigChan := make(chan os.Signal, 1) // sigChan канал для получения сигналов ОС, единичный буфер гарантирует вычитываение
 
-	// запускаем заданное количество воркеров
-	for i := 0; i < *countWorkers; i++ {
-		wg.Add(1) // увеличиваем счётчик WaitGroup
-		go worker(ctx, in, &wg)
-	}
-
-	// sigChan канал для получения сигналов ОС, единичный буфер гарантирует вычитываение
-	sigChan := make(chan os.Signal, 1)
 	// регистрируем канал для получения сигналов прерывания программы пользователем (Ctrl+C)
 	// или мягкого завершения окружением
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// запускаем заданное количество воркеров
+	for i := 0; i < n; i++ {
+		wg.Add(1) // увеличиваем счётчик WaitGroup
+		go worker(ctx, in, &wg)
+	}
 
 	number := 0 // число для отправки в канал передачи данных
 
 loop:
 	for {
 		select {
-		// если можем, отправляем число в канал in
-		case in <- number:
+		case in <- number: // если можем, отправляем число в канал in
 			number++
-			// если же есть сигнал прерывания, выходим из цикла
-		case <-sigChan:
+		case <-sigChan: // если же получаем сигнал прерывания, выходим из цикла
 			break loop
 		}
 	}

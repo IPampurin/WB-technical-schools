@@ -1,22 +1,22 @@
-/* ВАРИАНТ №3 - решение с применением паттерна на основе канала done и остановкой записи по времени */
+/* ВАРИАНТ №1 - решение с применением паттерна на основе канала done и остановкой программы по Ctrl + C */
 
 package main
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
 	"sync"
-	"time"
+	"syscall"
 )
 
-const (
-	n         = 5 // необходимое количество воркеров
-	limitTime = 5 // время выдачи данных в секундах
-)
+const n = 5 // количество горутин-воркеров
 
 // worker печатает в консоль значение, полученное из канала
 func worker(ch chan int, done chan struct{}, wg *sync.WaitGroup) {
 
 	defer wg.Done() // уменьшаем счётчик WaitGroup
+
 	for {
 		// постоянно слушаем два канала
 		select {
@@ -36,35 +36,33 @@ func main() {
 	// организуем WaitGroup
 	var wg sync.WaitGroup
 
-	done := make(chan struct{}) // канал отмены
-	in := make(chan int, n)     // канал для передачи данных
+	done := make(chan struct{})        // канал отмены
+	in := make(chan int, n)            // канал для передачи данных
+	sigChan := make(chan os.Signal, 1) // sigChan канал для получения сигналов ОС, единичный буфер гарантирует вычитываение
 
-	// запускаем n воркеров
+	// регистрируем канал для получения сигналов прерывания программы пользователем (Ctrl+C)
+	// или мягкого завершения окружением
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// запускаем воркеры
 	for i := 0; i < n; i++ {
 		wg.Add(1) // увеличиваем счётчик WaitGroup
 		go worker(in, done, &wg)
 	}
-
-	// для корректной остановки горутин через limitTime секунд закроем канал отмены
-	time.AfterFunc(limitTime*time.Second, func() {
-		close(done)
-	})
 
 	number := 0 // число для отправки в канал передачи данных
 
 loop:
 	for {
 		select {
-		// если можем, отправляем число в канал in
-		case in <- number:
+		case in <- number: // если можем, отправляем число в канал in
 			number++
-			// если же done закрыт и можем его вычитать, закрываем in и выходим из цикла
-		case <-done:
-			close(in)
+		case <-sigChan: // если же получаем сигнал прерывания, выходим из цикла
 			break loop
 		}
 	}
 
-	// ждём остановки всех воркеров
-	wg.Wait()
+	close(done) // закрываем done, чтобы его можно было вычитать в воркерах
+	close(in)   // закрываем in
+	wg.Wait()   // ждём остановки всех воркеров
 }
