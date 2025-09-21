@@ -1,8 +1,9 @@
-/* ВАРИАНТ №2 - выход из горутины по сигналу через канал уведомления */
+/* ВАРИАНТ №3 - выход из горутины через контекст с отменой */
 
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -10,7 +11,7 @@ import (
 const countForSearch = 8 // число, при нахождении которого завершаем горутину
 
 // doSomething удваивает числа
-func doSomething(in <-chan int, out chan<- int, done chan struct{}) {
+func doSomething(ctx context.Context, in <-chan int, out chan<- int) {
 
 	defer close(out) // гарантируем закрытие out
 
@@ -22,7 +23,7 @@ func doSomething(in <-chan int, out chan<- int, done chan struct{}) {
 			}
 			time.Sleep(500 * time.Millisecond) // создаём вид бурной дейтельности
 			out <- v * 2                       // отправляем удвоенное принятое число
-		case <-done: // при поступлении сигнала, закрываем out и завершаем горутину
+		case <-ctx.Done(): // при поступлении сигнала, закрываем out и завершаем горутину
 			fmt.Println("Завершили горутину.")
 			return
 		}
@@ -31,12 +32,15 @@ func doSomething(in <-chan int, out chan<- int, done chan struct{}) {
 
 func main() {
 
-	in := make(chan int)        // канал отправки данных в работу
-	out := make(chan int)       // канал приёма результатов
-	done := make(chan struct{}) // канал отмены
+	// определяем контекст
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // гарантируем отмену контекста
+
+	in := make(chan int)  // канал отправки данных в работу
+	out := make(chan int) // канал приёма результатов
 
 	// запускаем отдельную горутину
-	go doSomething(in, out, done)
+	go doSomething(ctx, in, out)
 
 	number := 0 // числа для отправки в работу
 
@@ -50,10 +54,10 @@ loop:
 				break loop
 			}
 			fmt.Println(v)
-			// если поступившее число равно искомому, закрываем каналы и выходим из цикла
+			// если поступившее число равно искомому, закрываем контекст и канал, выходим из цикла
 			if v == countForSearch {
 				fmt.Println("Поступил искомый результат.")
-				close(done)
+				cancel()
 				close(in)
 				break loop
 			}
