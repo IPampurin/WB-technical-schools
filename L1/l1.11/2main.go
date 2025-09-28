@@ -35,6 +35,16 @@ func main() {
 
 	job := make(chan int, bufferSize)    // канал для передачи воркерам значений из второго массива
 	result := make(chan int, bufferSize) // канал для возврата числа, входящего в пересечение
+	done := make(chan struct{})          // канал для сигнала завершения вычитывания результатов
+
+	// в отдельной горутине вычитываем result пока в нём что-то будет
+	// и пишем числа в массив с пересекающимися данными
+	go func() {
+		for num := range result {
+			intersection = append(intersection, num)
+		}
+		close(done)
+	}()
 
 	// запускаем numWorkers воркеров
 	for i := 0; i < numWorkers; i++ {
@@ -59,15 +69,10 @@ func main() {
 	close(job) // закрываем job, чтобы воркеры закруглялись
 
 	// ждём завершения воркеров и закрываем канал с результатами
-	go func() {
-		wg.Wait()
-		close(result)
-	}()
+	wg.Wait()
+	close(result)
 
-	// вычитываем result пока в нём что-то будет и пишем числа в массив с пересекающимися данными
-	for num := range result {
-		intersection = append(intersection, num)
-	}
+	<-done
 
 	slices.Sort(intersection) // отсортируем для красоты (не обязательно)
 
