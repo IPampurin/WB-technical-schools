@@ -1,1 +1,0 @@
-numWorkers * 10

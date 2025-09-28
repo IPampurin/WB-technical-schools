@@ -109,11 +109,10 @@ func main() {
 
 	rand.Seed(time.Now().UnixNano()) // определяем сид
 
-	sizes := []int{100, 1000, 10000, 50000, 100000, 500000} // размеры тестовых массивов
+	sizes := []int{1000, 10000, 50000, 100000, 500000, 1000000} // размеры тестовых массивов
 
-	fmt.Println("Сравнение производительности:")
-	fmt.Println("Размер\t\tЛинейная\tПараллельная") // убрал колонки памяти
-	fmt.Println("------\t\t--------\t------------")
+	fmt.Println("\nСравнение времени выполнения:\n")
+	fmt.Printf("%s    %s    %s\n", "Размер массивов", "Линейная версия", "Многопоточная версия")
 
 	// производим замер для тестируемых размеров по очереди
 	for _, size := range sizes {
@@ -130,12 +129,10 @@ func main() {
 		res2 := intersectionPullWorkers(arrA, arrB)
 		pullTime := time.Since(start)
 
+		// игнорируем результаты работы тестируемых функций
 		_ = res1
 		_ = res2
 
-		fmt.Printf("%d\t\t%v\t%v\n",
-			size,
-			lineTime,
-			pullTime)
+		fmt.Printf("%15d %15.4f ms %20.4f ms\n", size, lineTime.Seconds()*1000, pullTime.Seconds()*1000)
 	}
 }
