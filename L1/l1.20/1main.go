@@ -1,30 +1,32 @@
-/* ВАРИАНТ №1 - решение задачи с использованием стандартной библиотеки */
+/* ВАРИАНТ №1 - решение задачи с использованием пакета strings */
 
 package main
 
 import (
 	"fmt"
+	"strings"
 )
 
-// revers разворачивает строковую переменную в обратную сторону
-func revers(s string) string {
+// textRevers разворачивает строковую переменную в обратную сторону
+func textRevers(s string) string {
 
-	runes := []rune(s) // представляем входящую строку как слайс рун
+	// разделяем строку по пробелам сколько бы их ни было
+	words := strings.Fields(s)
 
-	// проходим до половины слайса и меняем элемент слайса с противоположным
-	for i := 0; i < len(runes)/2; i++ {
-		runes[i], runes[len(runes)-1-i] = runes[len(runes)-1-i], runes[i]
+	// зеркалим слайс входящих слов
+	for i, j := 0, len(words)-1; i < j; i, j = i+1, j-1 {
+		words[i], words[j] = words[j], words[i]
 	}
 
-	// преобразуем слайс в строковую переменную и возвращаем
-	return string(runes)
+	// объединяем отзеркаленный слайс в строку с пробелами и возвращаем
+	return strings.Join(words, " ")
 }
 
 func main() {
 
-	input := "главрыба" // входящая строка
+	input := "snow dog sun" // входящая строка
 
-	input = revers(input) // меняем строку
+	input = textRevers(input) // меняем строку
 
 	fmt.Println(input) // выводим результат
 }
