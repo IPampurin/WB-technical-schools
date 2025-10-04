@@ -46,7 +46,7 @@ func main() {
 		go worker(i, ch, &wg, &counter)
 	}
 
-	wg.Wait() // ждём окончания работы воркером
+	wg.Wait() // ждём окончания работы воркеров
 
 	// выводим результат
 	fmt.Printf("\nОбработано чисел: %d\n", counter.Load())
