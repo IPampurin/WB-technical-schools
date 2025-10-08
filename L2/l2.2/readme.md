@@ -11,7 +11,7 @@
 
      func test() (x int) {  
         defer func() {  
-		x++  
+		    x++  
 	    }()  
 	    x = 1  
 	    return  
