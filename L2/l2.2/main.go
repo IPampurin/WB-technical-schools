@@ -25,6 +25,7 @@ func anotherTest() int {
 
 func main() {
 
+	// выводим в консоль значения переданные из функций
 	fmt.Println(test())
 	fmt.Println(anotherTest())
 }
