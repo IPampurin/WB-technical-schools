@@ -2,13 +2,45 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+	"unicode"
+)
 
-func UnpackingString(str string) (string, error) {
+func unpackingString(str string) (string, error) {
+	/*
+		if len([]rune(str)) == 0 {
+			return "", nil
+		}
+		if len([]rune(str)) == 1 && str == "\\" {
+			return "", fmt.Errorf("некорректная строка, т.к. в строке только знак экранирования\n")
+		}
+		if _, err := strconv.Atoi(str); err == nil {
+			return "", fmt.Errorf("некорректная строка, т.к. в строке только цифры\n")
+		}
+	*/
+	result := make([]rune, 0)
+	var prevSymbol rune
 
-	result := ""
+	for _, v := range str {
 
-	return result, nil
+		if unicode.IsLetter(v) {
+			result = append(result, v)
+		}
+		if unicode.IsDigit(v) {
+			n, err := strconv.Atoi(string(v))
+			if err != nil {
+				return "", fmt.Errorf("ошибка парсинга числа 'v': %w ", err)
+			}
+			repeatSymbol := strings.Repeat(string(prevSymbol), n)
+			result = append(result, []rune(repeatSymbol)...)
+		}
+		prevSymbol = v
+	}
+
+	return string(result), nil
 }
 
 func main() {
@@ -21,11 +53,11 @@ func main() {
 		"qwe\\4\\5", // "qwe45" (4 и 5 не трактуются как числа, т.к. экранированы)
 		"qwe\\45",   // "qwe44444" (\4 экранирует 4, поэтому распаковывается только 5)
 		"\\45",      // "44444"
-		"\\",        // ""
+		"\\",        // "" + err (некорректная строка, т.к. в строке только знак экранирования)
 	}
 
 	for _, v := range input {
-		resUnpack, err := UnpackingString(v)
+		resUnpack, err := unpackingString(v)
 		if err != nil {
 			fmt.Printf("Строка: %10s,  ошибка: %v\n", v, err)
 			continue
@@ -33,13 +65,3 @@ func main() {
 		fmt.Printf("Строка: %10s,  распаковка: %s\n", v, resUnpack)
 	}
 }
-
-/*
-	{"a4bc2d5e", "aaaabccddddde", nil},
-	{"abcd", "abcd", nil},
-	{"45", "", err},
-	{"", "", nil},
-	{"qwe\\4\\5", "qwe45", nil},
-	{"qwe\\45", "qwe44444", nil},
-	{"\\", "", nil},
-*/
