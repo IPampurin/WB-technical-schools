@@ -10,17 +10,17 @@ import (
 )
 
 func unpackingString(str string) (string, error) {
-	/*
-		if len([]rune(str)) == 0 {
-			return "", nil
-		}
-		if len([]rune(str)) == 1 && str == "\\" {
-			return "", fmt.Errorf("некорректная строка, т.к. в строке только знак экранирования\n")
-		}
-		if _, err := strconv.Atoi(str); err == nil {
-			return "", fmt.Errorf("некорректная строка, т.к. в строке только цифры\n")
-		}
-	*/
+
+	if len([]rune(str)) == 0 {
+		return "", nil
+	}
+	if len([]rune(str)) == 1 && str == "\\" {
+		return "", fmt.Errorf("некорректная строка, т.к. в строке только знак экранирования")
+	}
+	if _, err := strconv.Atoi(str); err == nil {
+		return "", fmt.Errorf("некорректная строка, т.к. в строке только цифры")
+	}
+
 	result := make([]rune, 0)
 	var prevSymbol rune
 
@@ -30,13 +30,18 @@ func unpackingString(str string) (string, error) {
 			result = append(result, v)
 		}
 		if unicode.IsDigit(v) {
-			n, err := strconv.Atoi(string(v))
-			if err != nil {
-				return "", fmt.Errorf("ошибка парсинга числа 'v': %w ", err)
+			if prevSymbol != '\\' {
+				n, err := strconv.Atoi(string(v))
+				if err != nil {
+					return "", fmt.Errorf("ошибка парсинга числа 'v': %w ", err)
+				}
+				repeatSymbol := strings.Repeat(string(prevSymbol), n-1)
+				result = append(result, []rune(repeatSymbol)...)
+			} else {
+				result = append(result, v)
 			}
-			repeatSymbol := strings.Repeat(string(prevSymbol), n)
-			result = append(result, []rune(repeatSymbol)...)
 		}
+
 		prevSymbol = v
 	}
 
