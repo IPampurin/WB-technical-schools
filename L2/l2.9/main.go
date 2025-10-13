@@ -33,3 +33,13 @@ func main() {
 		fmt.Printf("Строка: %10s,  распаковка: %s\n", v, resUnpack)
 	}
 }
+
+/*
+	{"a4bc2d5e", "aaaabccddddde", nil},
+	{"abcd", "abcd", nil},
+	{"45", "", err},
+	{"", "", nil},
+	{"qwe\\4\\5", "qwe45", nil},
+	{"qwe\\45", "qwe44444", nil},
+	{"\\", "", nil},
+*/
