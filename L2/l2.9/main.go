@@ -9,6 +9,7 @@ import (
 	"unicode"
 )
 
+// unpackingString распаковывает строку с учётом escape-последовательностей
 func unpackingString(str string) (string, error) {
 
 	// если строка пустая, сразу возвращаем пустую чтроку
@@ -49,12 +50,26 @@ func unpackingString(str string) (string, error) {
 		// если экранировки нет и
 		// если встречаем число, надо повторить предыдущий символ n-1 раз
 		if unicode.IsDigit(runes[i]) {
-			n, err := strconv.Atoi(string(runes[i]))
-			if err != nil {
-				return "", fmt.Errorf("ошибка парсинга числа '%q': %w", runes[i], err)
+			// находим конец числа
+			numStart := i
+			numEnd := i
+			for numEnd < len(runes) && unicode.IsDigit(runes[numEnd]) {
+				numEnd++
 			}
-			symbolRepeat := strings.Repeat(string(runes[i-1]), n-1)
+			// извлекаем число
+			countInRunes := string(runes[numStart:numEnd])
+			n, err := strconv.Atoi(countInRunes)
+			if err != nil {
+				return "", fmt.Errorf("ошибка парсинга числа '%s': %w", countInRunes, err)
+			}
+			if n == 0 {
+				return "", fmt.Errorf("некорректная строка: 0 в количестве повторений")
+			}
+			symbolRepeat := strings.Repeat(string(result[len(result)-1]), n-1)
 			result = append(result, []rune(symbolRepeat)...)
+
+			// перемещаем индекс за число
+			i = numEnd - 1
 		} else {
 			// а если встретили не цифру, то просто добавляем в result
 			result = append(result, runes[i])
@@ -82,6 +97,8 @@ func main() {
 		"\\",        // "" + err (некорректная строка, т.к. в строке только знак экранирования)
 		"abc\\",     // "" + err (некорректная строка, т.к. знак экранирования в конце строки)
 		"\\\\a",     // "\a"
+		"\\510",     // "5555555555"
+		"a0",        // "" + err (некорректная строка, т.к. 0 в количестве повторений)
 	}
 
 	for _, v := range input {

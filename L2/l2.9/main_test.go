@@ -23,6 +23,8 @@ func TestUnpackingString(t *testing.T) {
 		{"8", args{"\\"}, "", true},
 		{"9", args{"abc\\"}, "", true},
 		{"10", args{"\\\\a"}, "\\a", false},
+		{"11", args{"\\510"}, "5555555555", false},
+		{"12", args{"a0"}, "", true},
 	}
 
 	for _, tt := range tests {
