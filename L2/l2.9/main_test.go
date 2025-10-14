@@ -19,7 +19,10 @@ func TestUnpackingString(t *testing.T) {
 		{"4", args{""}, "", false},
 		{"5", args{"qwe\\4\\5"}, "qwe45", false},
 		{"6", args{"qwe\\45"}, "qwe44444", false},
-		{"7", args{"\\"}, "", true},
+		{"7", args{"\\45"}, "44444", false},
+		{"8", args{"\\"}, "", true},
+		{"9", args{"abc\\"}, "", true},
+		{"10", args{"\\\\a"}, "\\a", false},
 	}
 
 	for _, tt := range tests {

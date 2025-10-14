@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"unicode"
 )
 
@@ -21,13 +22,8 @@ func unpackingString(str string) (string, error) {
 
 	runes := []rune(str) // представляем вход как []rune
 
-	// если в строке только цифры
-	if _, err := strconv.Atoi(string(runes[0])); err == nil {
-		return "", fmt.Errorf("некорректная строка: цифра в начале")
-	}
-
 	// если цифра в начале строки, выдаём ошибку (под этот случай подпадает и строка из цифр)
-	if len(runes) == 1 && unicode.IsDigit(runes[0]) {
+	if unicode.IsDigit(runes[0]) {
 		return "", fmt.Errorf("некорректная строка: цифра в начале")
 	}
 
@@ -37,13 +33,40 @@ func unpackingString(str string) (string, error) {
 	// итерируемся по runes
 	for i := 0; i < len(runes); i++ {
 
+		// после экранировки добавляем символ как есть, переключаем флаг и идём за новым символом
+		if escapeFlag {
+			result = append(result, runes[i])
+			escapeFlag = false
+			continue
+		}
+
+		// если встречаем '\', переключаем флаг и идём за новым символом
 		if runes[i] == '\\' {
 			escapeFlag = true
+			continue
+		}
+
+		// если экранировки нет и
+		// если встречаем число, надо повторить предыдущий символ n-1 раз
+		if unicode.IsDigit(runes[i]) {
+			n, err := strconv.Atoi(string(runes[i]))
+			if err != nil {
+				return "", fmt.Errorf("ошибка парсинга числа '%q': %w", runes[i], err)
+			}
+			symbolRepeat := strings.Repeat(string(runes[i-1]), n-1)
+			result = append(result, []rune(symbolRepeat)...)
+		} else {
+			// а если встретили не цифру, то просто добавляем в result
+			result = append(result, runes[i])
 		}
 	}
 
-	return string(result), nil
+	// если по окончанию итерации у нас escapeFlag == true, значит '\' в конце строки
+	if escapeFlag {
+		return "", fmt.Errorf("некорректная строка: escape-символ в конце")
+	}
 
+	return string(result), nil
 }
 
 func main() {
@@ -57,7 +80,7 @@ func main() {
 		"qwe\\45",   // "qwe44444" (\4 экранирует 4, поэтому распаковывается только 5)
 		"\\45",      // "44444"
 		"\\",        // "" + err (некорректная строка, т.к. в строке только знак экранирования)
-		"a10b2",     // "aaaaaaaaaabb"
+		"abc\\",     // "" + err (некорректная строка, т.к. знак экранирования в конце строки)
 		"\\\\a",     // "\a"
 	}
 
