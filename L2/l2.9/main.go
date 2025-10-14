@@ -5,47 +5,45 @@ package main
 import (
 	"fmt"
 	"strconv"
-	"strings"
 	"unicode"
 )
 
 func unpackingString(str string) (string, error) {
 
-	if len([]rune(str)) == 0 {
+	// если строка пустая, сразу возвращаем пустую чтроку
+	if len(str) == 0 {
 		return "", nil
 	}
-	if len([]rune(str)) == 1 && str == "\\" {
-		return "", fmt.Errorf("некорректная строка, т.к. в строке только знак экранирования")
-	}
-	if _, err := strconv.Atoi(str); err == nil {
-		return "", fmt.Errorf("некорректная строка, т.к. в строке только цифры")
+	// если в строке только знак экранирования, то это ошибка
+	if len(str) == 1 && str == "\\" {
+		return "", fmt.Errorf("некорректная строка: в строке только знак экранирования")
 	}
 
-	result := make([]rune, 0)
-	var prevSymbol rune
+	runes := []rune(str) // представляем вход как []rune
 
-	for _, v := range str {
+	// если в строке только цифры
+	if _, err := strconv.Atoi(string(runes[0])); err == nil {
+		return "", fmt.Errorf("некорректная строка: цифра в начале")
+	}
 
-		if unicode.IsLetter(v) {
-			result = append(result, v)
+	// если цифра в начале строки, выдаём ошибку (под этот случай подпадает и строка из цифр)
+	if len(runes) == 1 && unicode.IsDigit(runes[0]) {
+		return "", fmt.Errorf("некорректная строка: цифра в начале")
+	}
+
+	result := make([]rune, 0) // место под распаковку
+	escapeFlag := false       // флаг встречи с '\'
+
+	// итерируемся по runes
+	for i := 0; i < len(runes); i++ {
+
+		if runes[i] == '\\' {
+			escapeFlag = true
 		}
-		if unicode.IsDigit(v) {
-			if prevSymbol != '\\' {
-				n, err := strconv.Atoi(string(v))
-				if err != nil {
-					return "", fmt.Errorf("ошибка парсинга числа 'v': %w ", err)
-				}
-				repeatSymbol := strings.Repeat(string(prevSymbol), n-1)
-				result = append(result, []rune(repeatSymbol)...)
-			} else {
-				result = append(result, v)
-			}
-		}
-
-		prevSymbol = v
 	}
 
 	return string(result), nil
+
 }
 
 func main() {
@@ -59,6 +57,8 @@ func main() {
 		"qwe\\45",   // "qwe44444" (\4 экранирует 4, поэтому распаковывается только 5)
 		"\\45",      // "44444"
 		"\\",        // "" + err (некорректная строка, т.к. в строке только знак экранирования)
+		"a10b2",     // "aaaaaaaaaabb"
+		"\\\\a",     // "\a"
 	}
 
 	for _, v := range input {
