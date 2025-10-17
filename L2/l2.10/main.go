@@ -12,15 +12,15 @@ import (
 
 // Config - конфигурация сортировки
 type Config struct {
-	keyColumn            int //
-	numeric              bool
-	reverse              bool
-	unique               bool
-	month                bool
-	ignoreTrailingBlanks bool
-	checkSorted          bool
-	humanNumeric         bool
-	columnSeparator      string
+	keyColumn            int    // флаг сортировки по столбцам
+	numeric              bool   // флаг числовой сортировки
+	reverse              bool   // флаг сортировки в обратном порядке
+	unique               bool   // флаг выдачи без повторов
+	month                bool   // сортировка по месяцам
+	ignoreTrailingBlanks bool   // флаг игнора хвостовых пробелов
+	checkSorted          bool   // флаг проверки на отсортированность
+	humanNumeric         bool   // флаг сортировки по размерам
+	columnSeparator      string // разделитель по умолчанию (табуляция)
 }
 
 // parseFlags парсит флаги строки запуска программы
@@ -35,13 +35,16 @@ func parseFlags() Config {
 	flag.BoolVar(&config.ignoreTrailingBlanks, "b", false, "ignore trailing blanks")
 	flag.BoolVar(&config.checkSorted, "c", false, "check if sorted")
 	flag.BoolVar(&config.humanNumeric, "h", false, "sort by human-readable sizes")
-	flag.Parse()
 
-	config.columnSeparator = "\t" // по умолчанию табуляция
+	flag.Parse() // парсим флаги из командной строки (Must be called after all flags are defined and before flags are accessed by the program)
+
+	config.columnSeparator = "\t" // разделитель по умолчанию (табуляция)
+
+	// возвращаем структуру
 	return config
 }
 
-// readLines считывает
+// readLines считывает ввод по строкам
 func readLines(r io.Reader) []string {
 
 	scanner := bufio.NewScanner(r)
@@ -63,18 +66,21 @@ func readLines(r io.Reader) []string {
 
 func main() {
 
-	config := parseFlags()
+	config := parseFlags() // парсим флаги запуска
 
-	var input io.Reader
-	if filename := flag.Arg(0); filename != "" {
-		file, err := os.Open(filename)
+	var input io.Reader // объявляем ридер
+
+	if fileName := flag.Arg(0); fileName != "" {
+		// если при запуске программы указано имя файла, то читаем из него
+		file, err := os.Open(fileName)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ошибка открытия файла: %v\n", err)
 			os.Exit(1)
 		}
-		defer file.Close()
+		defer file.Close() // обеспечиваем закрытие файла
 		input = file
 	} else {
+		// если при запуске программы имя файла не указано, то читаем из консоли
 		input = os.Stdin
 	}
 
