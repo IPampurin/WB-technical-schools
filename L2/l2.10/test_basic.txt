@@ -1,0 +1,11 @@
+apple
+Banana
+cherry
+date
+Apple
+banana
+zebra
+alpha
+123
+45
+6

@@ -1,0 +1,7 @@
+alpha	100	3.14	Jan
+beta	50	1.41	Feb
+gamma	200	2.71	Mar
+delta	25	0.58	Apr
+apple	red	fruit	100
+banana	yellow	fruit	50
+cherry	red	fruit	200
