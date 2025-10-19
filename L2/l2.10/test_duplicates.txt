@@ -1,9 +1,0 @@
-apple
-banana
-apple
-cherry
-banana
-date
-unique1
-unique2
-unique1

@@ -1,9 +1,0 @@
-42
-apple
-Jan
-1K
-beta	50	Feb
-apple	100	Jan
-banana
-Mar
-2M

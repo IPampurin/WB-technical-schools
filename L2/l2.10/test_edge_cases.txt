@@ -1,7 +1,0 @@
-  
-leading
-trailing  
-   
-empty_column	100		Jan
-partial_column		2.5	Feb
-only_columns				Mar
