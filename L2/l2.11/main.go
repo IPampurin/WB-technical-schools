@@ -18,11 +18,19 @@ func sortAnagram(words []string) map[string][]string {
 	// первого вхождения слова множества
 	anaKeys := make(map[string]string)
 
+	// вспомогательная мапа для отслеживания повторений
+	unique := make(map[string]struct{})
+
 	// проходим по словам поступившего слайса
 	for _, word := range words {
 
 		// приводим слово к нижнему регистру
 		word = strings.ToLower(word)
+
+		// пропускаем дубликаты
+		if _, ok := unique[word]; ok {
+			continue
+		}
 
 		// разбиваем слово на руны
 		runes := []rune(word)
@@ -36,14 +44,18 @@ func sortAnagram(words []string) map[string][]string {
 			// если слово из множества не встречали, то заносим
 			// первое встреченное слово множества как значение
 			anaKeys[key] = word
-			// и добавляем в соответствующее множество встреченное слово
-			result[anaKeys[key]] = append(result[anaKeys[key]], word)
-		} else {
-			// а если слова из множества уже встречались,
-			// то добавляем в соответствующее множество встреченное слово
-			result[anaKeys[key]] = append(result[anaKeys[key]], word)
 		}
+		// и добавляем в соответствующее множество встреченное слово
+		result[anaKeys[key]] = append(result[anaKeys[key]], word)
+	}
 
+	// проходим по мапе, сортируем множества и удаляем единичные множества
+	for key, val := range result {
+		if len(val) <= 1 {
+			delete(result, key)
+		} else {
+			slices.Sort(val)
+		}
 	}
 
 	return result
@@ -53,11 +65,10 @@ func main() {
 
 	input := []string{"пятак", "пятка", "тяпка", "листок", "слиток", "столик", "стол"}
 
-	anagrams := sortAnagram(input)
+	anagrams := sortAnagram(input) // получаем мапу с множествами
 
+	// итерируемся по мапе и выводим результат
 	for key, val := range anagrams {
-		if len(val) != 1 {
-			fmt.Printf("%s: %v\n", key, val)
-		}
+		fmt.Printf("%s: %v\n", key, val)
 	}
 }
