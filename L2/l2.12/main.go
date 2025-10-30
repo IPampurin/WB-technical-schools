@@ -48,15 +48,9 @@ type Line struct {
 	content string // содержимое строки
 }
 
-// MatchResult представляет результат совпадения
-type MatchResult struct {
-	line      Line // сама строка (с номером и содержимым)
-	matched   bool // соответствует ли строка шаблону (после учета флага -v)
-	processed bool // была ли строка уже обработана/выведена
-}
+func grep(config Config, input io.Reader) error {
 
-func grep(config Config, input io.Reader) {
-
+	return nil
 }
 
 func main() {
@@ -66,30 +60,36 @@ func main() {
 	// получаем шаблон и имя файла
 	args := flag.Args()
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Используйте: grep [-флаги] искомое [файл]")
+		fmt.Fprintln(os.Stderr, "Используйте: grep [-флаги] шаблон [файл]")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
 
+	// шаблон поиска - первый аргумент
 	config.pattern = args[0]
 
 	var input io.Reader // объявляем ридер
 
-	if fileName := flag.Arg(1); fileName != "" {
-		// если при запуске программы указано имя файла, то читаем из него
-		file, err := os.Open(fileName)
-		if err != nil {
+	if len(args) > 1 {
+		// если второй аргумент (файл) при запуске указан, то читаем из файла
+		config.filename = args[1] // имя файла - второй аргумент
+
+		file, err := os.Open(config.filename)
+		if err != nil { // обрабатываем ошибку открытия файла
 			fmt.Fprintf(os.Stderr, "ошибка открытия файла: %v\n", err)
 			os.Exit(1)
 		}
 		defer file.Close() // обеспечиваем закрытие файла
 		input = file
+
 	} else {
-		// если при запуске программы имя файла не указано, то читаем из консоли
+		// а если при запуске программы имя файла не указано, то читаем из консоли
 		input = os.Stdin
 	}
 
-	// выполняем фильтрацию
-	grep(config, input)
-
+	// выполняем фильтрацию, с учётом обработки ошибок
+	if err := grep(config, input); err != nil {
+		fmt.Fprintf(os.Stderr, "ошибка выполнения: %v\n", err)
+		os.Exit(1)
+	}
 }
