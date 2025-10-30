@@ -3,24 +3,26 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 )
 
 // Config - конфигурация фильтрации
 type Config struct {
-	after      int    // количество символов после
-	before     int    // количество символов до
-	context    int    // количество символов вокруг
-	count      bool   // надо только количество совпадений строк?
-	ignoreCase bool   // надо игнорировать регистр?
-	invert     bool   // надо инвертировать фильтр?
-	fixed      bool   // надо точное совпадение?
-	lineNumber bool   // надо пронумеровать совпадения?
-	pattern    string // строка для фильтра
-	filename   string // имя файла
+	after      int    // количество символов после (флаг -A)
+	before     int    // количество символов до (флаг -B)
+	context    int    // количество символов вокруг (флаг -C)
+	count      bool   // надо только количество совпадений строк? (флаг -c)
+	ignoreCase bool   // надо игнорировать регистр? (флаг -i)
+	invert     bool   // надо инвертировать фильтр? (флаг -v)
+	fixed      bool   // надо точное совпадение? (флаг -F)
+	lineNumber bool   // надо пронумеровать совпадения? (флаг -n)
+	pattern    string // шаблон для фильтра (регулярное выражение или фиксированная строка)
+	filename   string // имя файла (если не указан - читаем из Stdin)
 }
 
 // parseFlags парсит флаги строки запуска программы
@@ -44,11 +46,141 @@ func parseFlags() Config {
 
 // Line представляет строку с ввода
 type Line struct {
-	number  int    // номер строки
+	number  int    // номер строки в исходном потоке (начиная с 1)
 	content string // содержимое строки
 }
 
 func grep(config Config, input io.Reader) error {
+
+	scanner := bufio.NewScanner(input)
+
+	var lines []Line // слайс для хранения всех строк с их номерами
+	lineNum := 0     // счётчик строк для нумерации
+
+	// считываем строки пока они есть, прибавляем счётчик
+	// нумерации и добавляем информацию в слайс
+	for scanner.Scan() {
+		lineNum++
+		lines = append(lines, Line{
+			number:  lineNum,
+			content: scanner.Text(),
+		})
+	}
+
+	// обрабатывем ошибку сканера (файл кирдык)
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("ошибка чтения входных данных: %w", err)
+	}
+
+	pattern := config.pattern // шаблон для поиска с учётом флагов
+
+	// добавляем модификатор игнора регистра к регулярному выражению
+	if config.ignoreCase {
+		pattern = "(?i)" + pattern
+	}
+
+	// экранируем специальные символы если шаблон должен трактоваться как фиксированная строка
+	if config.fixed {
+		pattern = regexp.QuoteMeta(pattern)
+	}
+
+	// компилируем регулярное выражение
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return fmt.Errorf("неверный шаблон: %w", err)
+	}
+
+	// определяем размер контекста для вывода
+	before := config.before
+	after := config.after
+	// если задан общий контекст, он переопределяет отдельные флаги до/после
+	if config.context > 0 {
+		before = config.context
+		after = config.context
+	}
+
+	// проверяем каждую строку на соответствие шаблону
+	matches := make([]bool, len(lines)) // слайс флагов совпадений для каждой строки
+	for i, line := range lines {
+		matched := re.MatchString(line.content) // проверяем совпадение с регулярным выражением
+
+		// инвертируем результат если установлен флаг -v
+		if config.invert {
+			matched = !matched
+		}
+
+		matches[i] = matched
+	}
+
+	// если необходимо только количество совпадений,
+	// выводим количество и завершаем работу
+	if config.count {
+		count := 0
+
+		for _, matched := range matches {
+			if matched {
+				count++
+			}
+		}
+
+		fmt.Printf("%d\n", count)
+		return nil
+	}
+
+	// обрабатываем вывод с учётом контекста (строк до и после совпадений)
+	processed := make([]bool, len(lines)) // слайс для отслеживания уже обработанных строк для избежания дублирования
+	outputLines := make([]Line, 0)        // слайс строк для вывода
+
+	// проходим по всем строкам для поиска совпадений
+	for i, matched := range matches {
+		// пропускаем строки без совпадений или уже обработанные
+		if !matched || processed[i] {
+			continue
+		}
+
+		// добавляем строки контекста ДО совпадения
+		start := i - before // начальный индекс для контекста до
+		if start < 0 {
+			start = 0 // защита от выхода за границы массива
+		}
+		// добавляем строки контекста в результат если они ещё не были обработаны
+		for j := start; j < i; j++ {
+			if !processed[j] {
+				outputLines = append(outputLines, lines[j])
+				processed[j] = true
+			}
+		}
+
+		// добавляем саму строку с совпадением
+		if !processed[i] {
+			outputLines = append(outputLines, lines[i])
+			processed[i] = true
+		}
+
+		// добавляем строки контекста ПОСЛЕ совпадения
+		end := i + after + 1 // конечный индекс для контекста после
+		if end > len(lines) {
+			end = len(lines) // защита от выхода за границы массива
+		}
+		// добавляем строки контекста в результат если они ещё не были обработаны
+		for j := i + 1; j < end; j++ {
+			if !processed[j] {
+				outputLines = append(outputLines, lines[j])
+				processed[j] = true
+			}
+		}
+	}
+
+	// выводим результаты в консоль
+	for _, line := range outputLines {
+		if config.lineNumber {
+			// вывод с номером строки если установлен флаг -n
+			fmt.Printf("%d:%s\n", line.number, line.content)
+		} else {
+			// вывод только содержимого строки
+			fmt.Printf("%s\n", line.content)
+		}
+	}
 
 	return nil
 }
