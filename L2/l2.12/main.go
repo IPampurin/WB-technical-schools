@@ -50,7 +50,7 @@ type Line struct {
 	content string // содержимое строки
 }
 
-func grep(config Config, input io.Reader) error {
+func grep(config Config, input io.Reader) (*[]Line, int, error) {
 
 	scanner := bufio.NewScanner(input)
 
@@ -69,7 +69,7 @@ func grep(config Config, input io.Reader) error {
 
 	// обрабатывем ошибку сканера (файл кирдык)
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("ошибка чтения входных данных: %w", err)
+		return nil, 0, fmt.Errorf("ошибка чтения входных данных: %w", err)
 	}
 
 	pattern := config.pattern // шаблон для поиска с учётом флагов
@@ -87,7 +87,7 @@ func grep(config Config, input io.Reader) error {
 	// компилируем регулярное выражение
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return fmt.Errorf("неверный шаблон: %w", err)
+		return nil, 0, fmt.Errorf("неверный шаблон: %w", err)
 	}
 
 	// определяем размер контекста для вывода
@@ -113,7 +113,7 @@ func grep(config Config, input io.Reader) error {
 	}
 
 	// если необходимо только количество совпадений,
-	// выводим количество и завершаем работу
+	// возвращаем это количество
 	if config.count {
 		count := 0
 
@@ -123,8 +123,7 @@ func grep(config Config, input io.Reader) error {
 			}
 		}
 
-		fmt.Printf("%d\n", count)
-		return nil
+		return nil, count, nil
 	}
 
 	// обрабатываем вывод с учётом контекста (строк до и после совпадений)
@@ -171,18 +170,7 @@ func grep(config Config, input io.Reader) error {
 		}
 	}
 
-	// выводим результаты в консоль
-	for _, line := range outputLines {
-		if config.lineNumber {
-			// вывод с номером строки если установлен флаг -n
-			fmt.Printf("%d:%s\n", line.number, line.content)
-		} else {
-			// вывод только содержимого строки
-			fmt.Printf("%s\n", line.content)
-		}
-	}
-
-	return nil
+	return &outputLines, 0, nil
 }
 
 func main() {
@@ -220,8 +208,24 @@ func main() {
 	}
 
 	// выполняем фильтрацию, с учётом обработки ошибок
-	if err := grep(config, input); err != nil {
+	if outputLines, count, err := grep(config, input); err != nil {
 		fmt.Fprintf(os.Stderr, "ошибка выполнения: %v\n", err)
 		os.Exit(1)
+
+	} else if count != 0 {
+		// выводим количество в консоль
+		fmt.Printf("%d\n", count)
+
+	} else {
+		// выводим результаты в консоль
+		for _, line := range *outputLines {
+			if config.lineNumber {
+				// вывод с номером строки если установлен флаг -n
+				fmt.Printf("%d:%s\n", line.number, line.content)
+			} else {
+				// вывод только содержимого строки
+				fmt.Printf("%s\n", line.content)
+			}
+		}
 	}
 }
