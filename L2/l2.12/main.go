@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"sort"
 )
 
 // Config - конфигурация фильтрации
@@ -29,6 +30,14 @@ type Config struct {
 func parseFlags() Config {
 
 	config := Config{}
+
+	// устанавливаем сообщение об использовании на случай ошибки в написании флагов при запуске программы
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Используйте: grep [-флаги] шаблон [файл]\n")
+		fmt.Fprintf(os.Stderr, "Флаги:\n")
+		flag.PrintDefaults()
+	}
+
 	flag.IntVar(&config.after, "A", 0, "Print N lines after match")
 	flag.IntVar(&config.before, "B", 0, "Print N lines before match")
 	flag.IntVar(&config.context, "C", 0, "Print N lines of context around match")
@@ -126,48 +135,49 @@ func grep(config Config, input io.Reader) (*[]Line, int, error) {
 		return nil, count, nil
 	}
 
-	// обрабатываем вывод с учётом контекста (строк до и после совпадений)
-	processed := make([]bool, len(lines)) // слайс для отслеживания уже обработанных строк для избежания дублирования
-	outputLines := make([]Line, 0)        // слайс строк для вывода
+	// используем множество для хранения индексов строк к выводу
+	// это, вроде, решает проблему дублирования и пропусков при перекрывающемся контексте
+	outputIndexes := make(map[int]bool)
 
-	// проходим по всем строкам для поиска совпадений
+	// проходим по всем строкам и для каждой найденной добавляем её и контекст вокруг
 	for i, matched := range matches {
-		// пропускаем строки без совпадений или уже обработанные
-		if !matched || processed[i] {
-			continue
-		}
 
-		// добавляем строки контекста ДО совпадения
-		start := i - before // начальный индекс для контекста до
-		if start < 0 {
-			start = 0 // защита от выхода за границы массива
-		}
-		// добавляем строки контекста в результат если они ещё не были обработаны
-		for j := start; j < i; j++ {
-			if !processed[j] {
-				outputLines = append(outputLines, lines[j])
-				processed[j] = true
+		if matched {
+			// добавляем строки контекста ДО совпадения
+			start := i - before
+			if start < 0 {
+				start = 0
+			}
+			for j := start; j < i; j++ {
+				outputIndexes[j] = true
+			}
+
+			// добавляем саму строку с совпадением
+			outputIndexes[i] = true
+
+			// добавляем строки контекста ПОСЛЕ совпадения
+			end := i + after
+			if end >= len(lines) {
+				end = len(lines) - 1
+			}
+			for j := i + 1; j <= end; j++ {
+				outputIndexes[j] = true
 			}
 		}
+	}
 
-		// добавляем саму строку с совпадением
-		if !processed[i] {
-			outputLines = append(outputLines, lines[i])
-			processed[i] = true
-		}
+	// преобразуем множество индексов в отсортированный слайс
+	// это гарантирует, что строки будут выведены в правильном порядке
+	var sortedIndexes []int
+	for idx := range outputIndexes {
+		sortedIndexes = append(sortedIndexes, idx)
+	}
+	sort.Ints(sortedIndexes)
 
-		// добавляем строки контекста ПОСЛЕ совпадения
-		end := i + after + 1 // конечный индекс для контекста после
-		if end > len(lines) {
-			end = len(lines) // защита от выхода за границы массива
-		}
-		// добавляем строки контекста в результат если они ещё не были обработаны
-		for j := i + 1; j < end; j++ {
-			if !processed[j] {
-				outputLines = append(outputLines, lines[j])
-				processed[j] = true
-			}
-		}
+	// собираем строки для вывода в правильном порядке
+	var outputLines []Line
+	for _, idx := range sortedIndexes {
+		outputLines = append(outputLines, lines[idx])
 	}
 
 	return &outputLines, 0, nil
