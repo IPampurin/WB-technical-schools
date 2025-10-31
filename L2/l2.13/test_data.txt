@@ -1,0 +1,6 @@
+name	age	city	country
+Alice	25	London	UK
+Bob	30	New York	USA
+Charlie	35	Tokyo	Japan
+Diana	28	Paris	France
+NoDelimiterHere
