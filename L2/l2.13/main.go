@@ -40,6 +40,12 @@ func parseFlags() Config {
 
 	flag.Parse() // парсим флаги из командной строки (Must be called after all flags are defined and before flags are accessed by the program)
 
+	// если вообще ничего не указано при запуске
+	if config.fields == "" && len(flag.Args()) == 0 {
+		flag.Usage()
+		os.Exit(1)
+	}
+
 	return config
 }
 
