@@ -6,7 +6,8 @@
 
 Сигнатура функции может быть такой:
 
-var or func(channels ...<-chan interface{}) <-chan interface{}
+    var or func(channels ...<-chan interface{}) <-chan interface{}
+
 Пример использования функции:
 
     sig := func(after time.Duration) &lt;-chan interface{} {
