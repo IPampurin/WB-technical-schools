@@ -14,32 +14,35 @@ func or(channels ...<-chan interface{}) <-chan interface{} {
 	outCh := make(chan interface{})    // возвращаемый канал
 	doneWorkers := make(chan struct{}) // канал завершения работы всем воркерам
 
+	// предусматриваем единственное закрытие канала doneWorkers (чтобы не закрывать закрытый канал)
+	var once sync.Once
+	closeDoneWorkers := func() { close(doneWorkers) }
+
+	var wg sync.WaitGroup
+
 	go func() {
 
-		var wg sync.WaitGroup
+		defer close(outCh) // закрываем отдаваемый канал, чтобы в main из него можно было словить zero value
+
 		// объявим пул воркеров и дадим каждому воркеру по каналу из channels
 		wg.Add(len(channels))
 		for i := 0; i < len(channels); i++ {
+
 			// в воркере будем слушать каналы
 			go func(i int) {
 				defer wg.Done()
-				for {
-					select {
-					// если получаем сигнал отмены из внешнего канала отмены
-					case <-channels[i]:
-						close(outCh)              // закрываем отдаваемый канал, чтобы в main из него можно было словить zero value
-						doneWorkers <- struct{}{} // отправляем сигнал отмены для остальных воркеров
-						return
-					// а если получаем сигнал о том, что кто-то из воркеров уже получил
-					// внешний сигнал отмены, завершаем работу воркера
-					case <-doneWorkers:
-						return
-					}
+				select {
+				// если получаем сигнал отмены из внешнего канала отмены
+				// отправляем сигнал отмены для остальных воркеров
+				case <-channels[i]:
+					once.Do(closeDoneWorkers) // один раз закрываем канал оповещения остальных горутин
+				// а если получаем сигнал о том, что кто-то из воркеров уже получил
+				// внешний сигнал отмены, завершаем работу воркера
+				case <-doneWorkers:
 				}
 			}(i)
 		}
 		wg.Wait()
-		close(doneWorkers) // закрываем каанл отмены для воркеров, чтобы они завершили работу
 	}()
 
 	return outCh
