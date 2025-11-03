@@ -40,7 +40,7 @@ func mergeTwoChannel(a, b <-chan interface{}) <-chan interface{} {
 	closeDoneWorkers := func() { close(doneWorkers) }
 
 	// в отдельной горутине слушаем два канала
-	// если что-то приходит по любому из двух каналов, закрываем канал out и
+	// если что-то приходит по любому из двух каналов, закрываем канал out
 	go func() {
 
 		defer close(out) // гарантируем закрытие out
