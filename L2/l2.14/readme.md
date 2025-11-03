@@ -10,7 +10,7 @@
 
 Пример использования функции:
 
-    sig := func(after time.Duration) &lt;-chan interface{} {
+    sig := func(after time.Duration) <-chan interface{} {
        c := make(chan interface{})
        go func() {
           defer close(c)
