@@ -30,11 +30,11 @@ func main() {
 	log.Println("Соединение с брокером установлено.")
 
 	// определяем продюсер
-	w := kafka.NewWriter(kafka.WriterConfig{
-		Brokers: []string{"localhost:9092"}, // список брокеров
-		Topic:   topic,                      // имя топика, в который будем слать сообщения
+	w := &kafka.Writer{
+		Addr:  kafka.TCP("localhost:9092"), // список брокеров
+		Topic: topic,                       // имя топика, в который будем слать сообщения
 		// RequiredAcks: kafka.WaitForLocal	// по умолчанию лидер в кафке подтверждает получение сообщения
-	})
+	}
 	defer w.Close()
 
 	log.Println("Начинаем генерировать тестовые данные.")
