@@ -39,7 +39,9 @@ func GetOrderByID(w http.ResponseWriter, r *http.Request) {
 		if err = json.Unmarshal(jsonData, &order); err != nil {
 			log.Printf("Битые данные в кэше: %s. Удаляем ключ.", cacheKey)
 			// убираем мусор
-			cache.DelCache(cacheKey)
+			if err := cache.DelCache(cacheKey); err != nil {
+				log.Printf("Ошибка удаления битых данных из кэша %s: %v", cacheKey, err)
+			}
 		} else {
 			// если данные корректные
 			// маршалим даные в JSON с отступами для читаемости

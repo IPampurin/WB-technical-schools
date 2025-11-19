@@ -49,7 +49,7 @@ func GetOrders(w http.ResponseWriter, r *http.Request) {
 
 	if err := query.Find(&orders).Error; err != nil {
 		log.Printf("Ошибка при получении заказов: %v", err)
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 

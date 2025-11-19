@@ -40,7 +40,11 @@ func consumer(ctx context.Context) {
 		MinBytes: 0,
 		MaxWait:  10 * time.Second,
 	})
-	defer r.Close()
+	defer func() {
+		if err := r.Close(); err != nil {
+			log.Printf("Ошибка при закрытии ридера Kafka: %v", err)
+		}
+	}()
 
 	log.Printf("Консуюмер подписан на топик '%s' в группе '%s'\n", topic, groupID)
 	log.Println("Начинаем вычитывать !!!")
@@ -67,6 +71,10 @@ func consumer(ctx context.Context) {
 
 		if 200 <= resp.StatusCode && resp.StatusCode < 300 || resp.StatusCode == http.StatusConflict { // статусы 2XX = ок и 409 = дубль
 			if err := r.CommitMessages(ctx, m); err != nil {
+				if errors.Is(err, context.Canceled) {
+					log.Println("Получен сигнал завершения работы консюмера при коммите.")
+					break
+				}
 				log.Printf("ошибка при коммите сообщения %s\n: %v", m.Key, err)
 			} else {
 				log.Printf("Сообщение успешно обработано и закоммичено: %s\n", m.Key)

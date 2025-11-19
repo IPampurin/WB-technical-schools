@@ -48,7 +48,7 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Попытка добавить дубликат заказа (найден в кэше): OrderUID=%s", order.OrderUID)
 		http.Error(w, "заказ с таким OrderUID уже существует", http.StatusConflict)
 		return
-	} else if err != redis.Nil { // игнорируем ошибку "ключ не найден"
+	} else if !errors.Is(err, redis.Nil) { // игнорируем ошибку "ключ не найден"
 		log.Printf("Заказ с OrderUID=%s не найден в кэше. Проверяем в базе.", order.OrderUID)
 	}
 

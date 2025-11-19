@@ -35,7 +35,11 @@ func main() {
 		Topic: topic,                       // имя топика, в который будем слать сообщения
 		// RequiredAcks: kafka.WaitForLocal	// по умолчанию лидер в кафке подтверждает получение сообщения
 	}
-	defer w.Close()
+	defer func() {
+		if err := w.Close(); err != nil {
+			log.Printf("Ошибка при закрытии продюсера: %v", err)
+		}
+	}()
 
 	log.Println("Начинаем генерировать тестовые данные.")
 
@@ -280,7 +284,7 @@ func messageGenerate(count int) [][]byte {
 
 		orderInByte, err := json.Marshal(order) // превращаем экземпляр order в []byte
 		if err != nil {
-			continue // тут ошибка нам не интересна - просто пропустим досадную неожиданность
+			continue // в данном конкретном случае ошибка нам не интересна - просто пропустим досадную неожиданность
 		}
 
 		testMsg[i] = orderInByte
