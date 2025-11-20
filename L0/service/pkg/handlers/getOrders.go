@@ -8,10 +8,16 @@ import (
 
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/models"
+	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/shutdown"
 )
 
 // GetOrders выводит список всех заказов с учётом параметров пагинации и общим количеством
 func GetOrders(w http.ResponseWriter, r *http.Request) {
+
+	if shutdown.IsShuttingDown() {
+		http.Error(w, "Сервер находится в процессе остановки. Операция невозможна.", http.StatusServiceUnavailable)
+		return
+	}
 
 	// инициализируем переменные для пагинации
 	pageStr := r.URL.Query().Get("page")

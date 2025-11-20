@@ -9,6 +9,7 @@ import (
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/cache"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/models"
+	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/shutdown"
 	"github.com/go-chi/chi/v5"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -17,6 +18,12 @@ import (
 // DeleteOrder удаляет заказ и связанные с ним данные в случае
 // наличия order_uid в таблице и в параметрах запроса
 func DeleteOrder(w http.ResponseWriter, r *http.Request) {
+
+	// проверяем не останавливается ли сервер
+	if shutdown.IsShuttingDown() {
+		http.Error(w, "Сервер находится в процессе остановки. Операция невозможна.", http.StatusServiceUnavailable)
+		return
+	}
 
 	// получаем OrderUID из параметров запроса
 	orderUID := chi.URLParam(r, "order_uid")

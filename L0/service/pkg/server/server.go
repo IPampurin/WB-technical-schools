@@ -2,22 +2,19 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"sync/atomic"
 	"time"
 
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/handlers"
+	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/shutdown"
 	"github.com/go-chi/chi/v5"
 )
 
-var isShuttingDown int32 // atomic flag для graceful shutdown
-
-// Run запускает сервер с поддержкой graceful shutdown
-func Run(ctx context.Context) (*http.Server, error) {
+// Run запускает сервер и блокируется до graceful shutdown
+func Run(ctx context.Context) error {
 
 	// по умолчанию порт хоста 8081 (доступ в браузере на localhost:8081)
 	port, ok := os.LookupEnv("L0_PORT")
@@ -43,48 +40,33 @@ func Run(ctx context.Context) (*http.Server, error) {
 		Handler: r,
 	}
 
-	// запускаем сервер в отдельной горутине
+	// горутина для graceful shutdown
 	go func() {
-		log.Printf("Запуск сервера на порту %s", port)
-		if err := srv.ListenAndServe(); err != nil && errors.Is(err, http.ErrServerClosed) {
-			log.Printf("Ошибка сервера: %v\n", err)
+
+		// ждём сигнала отмены
+		<-ctx.Done()
+		log.Println("Получен сигнал завершения, начинаем graceful shutdown...")
+
+		// переключаем флаг
+		shutdown.StartShutdown()
+		log.Println("Приложение помечено как останавливающееся")
+
+		// останавливаем сервер (до окончания текущего соединения или 30 секунд)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("Ошибка при остановке сервера: %v\n", err)
+		} else {
+			log.Println("Сервер корректно остановлен")
 		}
 	}()
 
-	return srv, nil
-}
-
-// gracefulShutdownMiddleware блокирует новые запросы при shutdown
-func gracefulShutdownMiddleware(next http.Handler) http.Handler {
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if atomic.LoadInt32(&isShuttingDown) == 1 {
-			http.Error(w, "Сервер находится в процессе остановки. Попробуйте позже.", http.StatusServiceUnavailable)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// StartShutdown помечает сервер как останавливающийся
-func StartShutdown() {
-
-	atomic.StoreInt32(&isShuttingDown, 1)
-	log.Println("Сервер больше не принимает новые соединения")
-}
-
-// Shutdown выполняет graceful shutdown сервера
-func Shutdown(srv *http.Server) error {
-
-	if IsShuttingDown() {
-
+	// запускаем сервер (блокирующий вызов)
+	log.Printf("Запуск сервера на порту %s", port)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("ошибка сервера: %w", err)
 	}
 
-	StartShutdown()
-
-	// Даем время на завершение текущих запросов (но не более 30 сек)
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	return srv.Shutdown(shutdownCtx)
+	return nil
 }

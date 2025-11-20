@@ -10,12 +10,19 @@ import (
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/cache"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/models"
+	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/shutdown"
 	"github.com/go-chi/chi/v5"
 	"gorm.io/gorm"
 )
 
 // GetOrderByID выдаёт данные о заказе по order_uid
 func GetOrderByID(w http.ResponseWriter, r *http.Request) {
+
+	// проверяем не останавливается ли сервер
+	if shutdown.IsShuttingDown() {
+		http.Error(w, "Сервер находится в процессе остановки. Операция невозможна.", http.StatusServiceUnavailable)
+		return
+	}
 
 	// получаем OrderUID из параметров запроса
 	orderUID := chi.URLParam(r, "order_uid")

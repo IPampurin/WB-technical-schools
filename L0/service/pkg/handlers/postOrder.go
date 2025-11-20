@@ -12,12 +12,19 @@ import (
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/cache"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/models"
+	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/shutdown"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 // PostOrder принимает json с информацией о заказе и сохраняет данные в базе
 func PostOrder(w http.ResponseWriter, r *http.Request) {
+
+	// проверяем не останавливается ли сервер
+	if shutdown.IsShuttingDown() {
+		http.Error(w, "Сервер находится в процессе остановки. Операция невозможна.", http.StatusServiceUnavailable)
+		return
+	}
 
 	var order *models.Order
 	var buf bytes.Buffer
