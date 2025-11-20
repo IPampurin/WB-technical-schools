@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
+
+	"github.com/go-playground/validator/v10"
 
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/cache"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
@@ -42,9 +43,9 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// валидируем поступившие данные
-	if ok, message := validateOrder(order); !ok {
-		log.Printf("Получены некорректные данные: %v", message)
+	// валидируем поступившие данные с помощью пакета validator
+	if err = validateOrder(order); err != nil {
+		log.Printf("Получены некорректные данные: %v", err)
 		http.Error(w, "некорректные данные - не будем сохранять", http.StatusBadRequest)
 		return
 	}
@@ -120,60 +121,24 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Заказ UID = %s успешно добавлен в базу.", order.OrderUID)
 }
 
+// validate указатель на валидируемую структуру
+var validate = validator.New()
+
 // validateOrder проверяет заполненность полей поступивших данных
-// и комментирует некорректность для последующего логирования
-func validateOrder(order *models.Order) (bool, string) {
+func validateOrder(order *models.Order) error {
 
-	// валидация Order
-	if order.OrderUID == "" ||
-		order.TrackNumber == "" ||
-		order.CustomerID == "" ||
-		order.Locale == "" ||
-		order.DeliveryService == "" ||
-		order.Shardkey == "" ||
-		order.SMID == 0 {
-		return false, "Поля order должны быть заполнены."
-	}
-
-	// валидация Delivery
-	if order.Delivery.Name == "" ||
-		order.Delivery.Phone == "" ||
-		order.Delivery.Zip == "" ||
-		order.Delivery.City == "" ||
-		order.Delivery.Address == "" ||
-		order.Delivery.Region == "" ||
-		order.Delivery.Email == "" || len(strings.Split(order.Delivery.Email, "@")) != 2 {
-		return false, "Поля delivery должны быть заполнены, да ещё и корректно."
-	}
-
-	// валидация Payment
-	if order.Payment.Transaction == "" ||
-		order.Payment.Currency == "" ||
-		order.Payment.Provider == "" ||
-		order.Payment.Amount <= 0 ||
-		order.Payment.PaymentDT <= 0 ||
-		order.Payment.Bank == "" ||
-		order.Payment.DeliveryCost < 0 ||
-		order.Payment.GoodsTotal < 0 ||
-		order.Payment.CustomFee < 0 {
-		return false, "Поля payment должны быть заполнены, да ещё и корректно."
-	}
-
-	// валидация Items
-	if len(order.Items) == 0 {
-		return false, "Товар должен быть хотя бы один - items не корректен."
-	}
-	for _, item := range order.Items {
-		if item.ChrtID == 0 ||
-			item.Price <= 0 ||
-			item.RID == "" ||
-			item.Name == "" ||
-			item.TotalPrice <= 0 ||
-			item.NMID == 0 ||
-			item.Status == 0 {
-			return false, "Поля items должны быть заполнены, да ещё и корректно."
+	err := validate.Struct(order)
+	if err != nil {
+		// Преобразуем ошибки валидации в читаемый формат
+		if validationErrors, ok := err.(validator.ValidationErrors); ok {
+			var errorMessages []string
+			for _, fieldError := range validationErrors {
+				errorMessages = append(errorMessages,
+					fmt.Sprintf("Поле %s: %s", fieldError.Field(), fieldError.Tag()))
+			}
+			return fmt.Errorf("ошибки валидации: %v", errorMessages)
 		}
 	}
 
-	return true, ""
+	return err
 }

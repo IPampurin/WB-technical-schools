@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -64,7 +65,7 @@ func Run(ctx context.Context) error {
 
 	// запускаем сервер (блокирующий вызов)
 	log.Printf("Запуск сервера на порту %s", port)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := srv.ListenAndServe(); err != nil && errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("ошибка сервера: %w", err)
 	}
 
