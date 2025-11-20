@@ -14,6 +14,7 @@ import (
 // GetOrders выводит список всех заказов с учётом параметров пагинации и общим количеством
 func GetOrders(w http.ResponseWriter, r *http.Request) {
 
+	// проверяем не останавливается ли сервер
 	if shutdown.IsShuttingDown() {
 		http.Error(w, "Сервер находится в процессе остановки. Операция невозможна.", http.StatusServiceUnavailable)
 		return

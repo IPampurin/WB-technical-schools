@@ -1,5 +1,5 @@
 services:
-  web:
+  service:
     build: .
     env_file:
       - .env
@@ -8,6 +8,16 @@ services:
     command: go run main.go
     volumes:
       - .:/usr/src/app
+    depends_on:
+      - db  
+      - redis  
+    stop_grace_period: 40s
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/orders"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   db:
     image: postgres
@@ -19,6 +29,12 @@ services:
       - POSTGRES_DB=${DBL0_NAME}
     volumes:
       - postgres-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DBL0_USER} -d ${DBL0_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   redis:
     image: redis
