@@ -10,3 +10,4 @@ services:
     image: my-consumer  
     command: ["./consumer-L0"]
     network_mode: "host"
+    stop_grace_period: 45s
