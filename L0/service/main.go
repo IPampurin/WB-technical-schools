@@ -10,18 +10,11 @@ import (
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/cache"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/server"
-	"github.com/joho/godotenv"
 )
 
 func main() {
 
 	var err error
-
-	// загружаем переменные окружения
-	err = godotenv.Load()
-	if err != nil {
-		fmt.Printf("ошибка загрузки .env файла: %v\n", err)
-	}
 
 	// подключаем базу данных
 	err = db.ConnectDB()
@@ -42,7 +35,9 @@ func main() {
 	defer stop()
 
 	// запускаем сервер и ждем его завершения
+	log.Println("***** дошли до запуска сервера в main() *****")
 	if err := server.Run(ctx); err != nil {
+		log.Println("сервер в main() выдал ошибку")
 		log.Printf("Ошибка сервера: %v\n", err)
 		return
 	}

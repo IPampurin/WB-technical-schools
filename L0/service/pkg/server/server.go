@@ -43,7 +43,7 @@ func Run(ctx context.Context) error {
 
 	// горутина для graceful shutdown
 	go func() {
-
+		log.Println("***** горутина, ожидающая сигнала отмены, в server.go запустилась *****")
 		// ждём сигнала отмены
 		<-ctx.Done()
 		log.Println("Получен сигнал завершения, начинаем graceful shutdown...")
@@ -57,6 +57,7 @@ func Run(ctx context.Context) error {
 		defer cancel()
 
 		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Println("***** srv.Shutdown(shutdownCtx) в server.go пропустил ошибку*****")
 			log.Printf("Ошибка при остановке сервера: %v\n", err)
 		} else {
 			log.Println("Сервер корректно остановлен")
@@ -65,7 +66,8 @@ func Run(ctx context.Context) error {
 
 	// запускаем сервер (блокирующий вызов)
 	log.Printf("Запуск сервера на порту %s", port)
-	if err := srv.ListenAndServe(); err != nil && errors.Is(err, http.ErrServerClosed) {
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Println("***** ListenAndServe() в server.go пропустил ошибку*****")
 		return fmt.Errorf("ошибка сервера: %w", err)
 	}
 

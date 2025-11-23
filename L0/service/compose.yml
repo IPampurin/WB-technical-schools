@@ -5,19 +5,13 @@ services:
       - .env
     ports:
       - ${L0_PORT}:8081
-    command: go run main.go
-    volumes:
-      - .:/usr/src/app
     depends_on:
-      - db  
-      - redis  
-    stop_grace_period: 40s
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/orders"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy 
+    stop_grace_period: 45s
+
 
   db:
     image: postgres
@@ -31,10 +25,10 @@ services:
       - postgres-db:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DBL0_USER} -d ${DBL0_NAME}"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 5
-      start_period: 30s
+      retries: 10
+      start_period: 10s
 
   redis:
     image: redis
@@ -46,7 +40,13 @@ services:
       - REDIS_TTL=${REDIS_TTL}
     volumes:
       - redis_data:/data
-
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+      
 volumes:
   postgres-db:
   redis_data:
