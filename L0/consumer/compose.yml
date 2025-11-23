@@ -8,8 +8,5 @@ services:
     env_file:
       - .env
     image: my-consumer  
-    working_dir: /usr/src/app
-    command: go run main.go
-    volumes:
-      - ./:/usr/src/app
+    command: ["./consumer-L0"]
     network_mode: "host"
