@@ -3,9 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/brianvoe/gofakeit/v7"
@@ -27,7 +31,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("ошибка создания топика кафки: %v\n", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			log.Printf("Ошибка при закрытии продюсером соединения с  кафкой: %v", err)
+		}
+	}()
 
 	log.Println("Соединение с брокером установлено.")
 
@@ -48,25 +56,62 @@ func main() {
 	// собираем и отправляем тестовые сообщения
 	messages := messageGenerate(countMessage)
 
+	log.Printf("Сгенерировано %d сообщений. Начинаем отправку...", len(messages))
+
+	// организуем контекст для корректного завершения продюсера,
+	// например, если мы его в контейнере докера гасим
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// обработка сигналов
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// фоном слушаем сигналы отмены и отменяем контекст
+	go func() {
+		<-sigChan
+		log.Println("Получен сигнал остановки, завершаем отправку...")
+		cancel()
+	}()
+
 	log.Println("Начинаем отправку тестовых данных.")
 
+	sentCount := 0   // количество отправленных сообщений
+	failedCount := 0 // количество ошибок при отправке сообщений
+
+	// отправляем сообщения с проверкой контекста
 	for i, msgBody := range messages {
+
+		// проверяем контекст перед началом обработки каждого сообщения
+		if ctx.Err() != nil {
+			log.Printf("Отправка прервана. Успешно отправлено: %d/%d, не отправлено: %d",
+				sentCount, len(messages), len(messages)-sentCount)
+			return
+		}
+
 		msg := kafka.Message{
 			Key:   []byte(fmt.Sprintf("Сообщение №%d", i+1)),
 			Value: msgBody,
 			Time:  time.Now(),
 		}
 
-		// отправляем сообщения (по дефолту лидер в кафке подтверждает получение сообщения)
-		err := w.WriteMessages(context.Background(), msg)
+		// отправляем сообщение
+		err := w.WriteMessages(ctx, msg)
 		if err != nil {
-			log.Printf("ошибка отправления сообщения в кафку '%s': %v\n", msgBody, err)
+			if errors.Is(err, context.Canceled) {
+				log.Printf("Отправка прервана перед отправкой сообщения %d", i+1)
+				log.Printf("Итог: отправлено %d/%d, не отправлено: %d", sentCount, len(messages), len(messages)-sentCount)
+				return
+			}
+			log.Printf("Ошибка отправки сообщения №%d: %v", i+1, err)
+			failedCount++
 		} else {
-			fmt.Printf("Отправленное в кафку сообщение: %s\n", string(msgBody))
+			fmt.Printf("Успешно отправлено сообщение %d: %s\n", i+1, string(msgBody))
+			sentCount++
 		}
 	}
 
-	log.Println("Продюсер отправил тестовые сообщения.")
+	log.Println("Продюсер отправил все тестовые сообщения.")
 }
 
 // Заказ
