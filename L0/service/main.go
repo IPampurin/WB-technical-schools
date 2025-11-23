@@ -35,9 +35,7 @@ func main() {
 	defer stop()
 
 	// запускаем сервер и ждем его завершения
-	log.Println("***** дошли до запуска сервера в main() *****")
 	if err := server.Run(ctx); err != nil {
-		log.Println("сервер в main() выдал ошибку")
 		log.Printf("Ошибка сервера: %v\n", err)
 		return
 	}
