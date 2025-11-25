@@ -17,9 +17,52 @@ import (
 )
 
 var (
-	topic        = "my-topic-L0" // имя топика, в который пишем сообщения
-	countMessage = 10            // количество тестовых джасончиков
+	topic          = "my-topic-L0"          // имя топика, в который пишем сообщения
+	countMessage   = 10                     // количество тестовых джасончиков
+	maxRetries     = 3                      // количество повторных попыток связи
+	retryDelayBase = 100 * time.Millisecond // базовая задержка для попыток связи
 )
+
+// sendWithRetry отправляет сообщения с повторами
+func sendWithRetry(ctx context.Context, w *kafka.Writer, msg kafka.Message, msgNumber int) bool {
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+
+		err := w.WriteMessages(ctx, msg)
+		if err == nil {
+			return true // успешная отправка
+		}
+
+		// проверяем отмену контекста
+		if errors.Is(err, context.Canceled) {
+			log.Printf("Отправка прервана на сообщении %d (попытка %d)", msgNumber, attempt)
+			return false
+		}
+
+		log.Printf("Ошибка отправки сообщения №%d (попытка %d/%d): %v", msgNumber, attempt, maxRetries, err)
+
+		// проверяем номер попытки и делаем паузу перед следующей попыткой
+		if attempt < maxRetries {
+
+			// высчитываем увеличивающуюся паузу (200ms, 600ms, 1200ms)
+			delay := retryDelayBase * time.Duration(attempt*attempt+attempt)
+			log.Printf("Повторная отправка сообщения №%d через %v...", msgNumber, delay)
+
+			select {
+			case <-time.After(delay):
+				// продолжаем следующую попытку
+			case <-ctx.Done():
+				log.Printf("Отправка прервана во время ожидания ретрая для сообщения %d", msgNumber)
+				return false
+			}
+		}
+	}
+
+	// все попытки исчерпаны
+	log.Printf("Сообщение №%d не отправлено после %d попыток", msgNumber, maxRetries)
+
+	return false
+}
 
 func main() {
 
@@ -53,8 +96,12 @@ func main() {
 
 	log.Println("Начинаем генерировать тестовые данные.")
 
-	// собираем и отправляем тестовые сообщения
+	// собираем и отправляем тестовые сообщения, если они есть
 	messages := messageGenerate(countMessage)
+	if len(messages) == 0 {
+		log.Println("Не сгенерировано ни одного сообщения для отправки")
+		return
+	}
 
 	log.Printf("Сгенерировано %d сообщений. Начинаем отправку...", len(messages))
 
@@ -95,23 +142,23 @@ func main() {
 			Time:  time.Now(),
 		}
 
-		// отправляем сообщение
-		err := w.WriteMessages(ctx, msg)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				log.Printf("Отправка прервана перед отправкой сообщения %d", i+1)
-				log.Printf("Итог: отправлено %d/%d, не отправлено: %d", sentCount, len(messages), len(messages)-sentCount)
-				return
-			}
-			log.Printf("Ошибка отправки сообщения №%d: %v", i+1, err)
-			failedCount++
-		} else {
+		// отправляем сообщение с ретраями
+		success := sendWithRetry(ctx, w, msg, i+1)
+		if success {
 			fmt.Printf("Успешно отправлено сообщение %d: %s\n", i+1, string(msgBody))
 			sentCount++
+		} else {
+			failedCount++
 		}
 	}
 
-	log.Println("Продюсер отправил все тестовые сообщения.")
+	// финальная запись в логи
+	if failedCount > 0 {
+		log.Printf("Отправка завершена. Успешно: %d/%d, окончательных ошибок: %d",
+			sentCount, len(messages), failedCount)
+	} else {
+		log.Printf("Продюсер успешно отправил все %d сообщений.", sentCount)
+	}
 }
 
 // Заказ
