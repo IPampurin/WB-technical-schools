@@ -152,7 +152,6 @@ func consumer(ctx context.Context, apiUrl string) error {
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				log.Println("Получена отмена контекста при отправке в api.")
-				resp.Body.Close()
 				break
 			}
 			// логируем ошибку отправки, но продолжаем работу
