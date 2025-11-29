@@ -112,15 +112,15 @@ func TestConsumerAPIIntegration(t *testing.T) {
 	defer conn.Close()
 
 	// сохраняем оригинальные значения топика и группы
-	originTopic := topic
-	originGroupID := groupID
+	originTopic := topicConst
+	originGroupID := groupIDConst
 	originPort := os.Getenv("L0_PORT")
 	originTimeLimitConsumer := os.Getenv("TIME_LIMIT_CONSUMER_L0")
 
 	// настраиваем Cleanup для возврата подмены настроек окружения
 	t.Cleanup(func() {
-		topic = originTopic
-		groupID = originGroupID
+		topicConst = originTopic
+		groupIDConst = originGroupID
 		os.Setenv("L0_PORT", originPort)
 		os.Setenv("TIME_LIMIT_CONSUMER_L0", originTimeLimitConsumer)
 
@@ -147,8 +147,8 @@ func TestConsumerAPIIntegration(t *testing.T) {
 	testPort := u.Port()
 
 	// подменяем настройки
-	topic = testTopic
-	groupID = testGroupID
+	topicConst = testTopic
+	groupIDConst = testGroupID
 	os.Setenv("L0_PORT", testPort) // используем порт тестового сервера
 	os.Setenv("TIME_LIMIT_CONSUMER_L0", testTimeLimitConsumer)
 
