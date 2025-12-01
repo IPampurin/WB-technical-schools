@@ -87,7 +87,8 @@
                 border-radius: 4px;
                 font-family: monospace;
                 resize: vertical;
-            " required placeholder='{"order_uid": "test123", "track_number": "WB123456789", ...}'></textarea>
+            " required placeholder='Один заказ: {"order_uid": "test123", ...}
+Несколько заказов: [{"order_uid": "test123", ...}, {"order_uid": "test456", ...}, ...]'></textarea>
 
                 <button type="submit" style="
             padding: 10px 20px;
@@ -98,7 +99,7 @@
             cursor: pointer;
             margin-top: 15px;
         ">
-                    Создать заказ
+                    Создать заказ (-ы)
                 </button>
 
                 <div id="create-error" style="
@@ -172,14 +173,21 @@
                 successDiv.style.display = 'none';
 
                 try {
-                    // Валидация JSON
-                    const jsonData = JSON.parse(textarea.value);
+                    // Валидация JSON - как массив
+                    let jsonData = JSON.parse(textarea.value);
+
+                    // если пришел объект - оборачиваем в массив
+                    // если пришел массив - оставляем как есть
+                    if (!Array.isArray(jsonData)) {
+                        jsonData = [jsonData];
+                    }
 
                     const response = await fetch('/order', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
                         },
+                        // отправка - всегда массив
                         body: JSON.stringify(jsonData)
                     });
 
@@ -191,31 +199,50 @@
                     }
 
                     // Успешное создание
-                    successDiv.innerHTML = responseStatus === 201
-                        ? 'Заказ успешно создан!'
-                        : `Успешный ответ (${responseStatus})`;
+            successDiv.style.display = 'block';
+            textarea.value = '';
 
-                    successDiv.style.display = 'block';
-                    textarea.value = '';
-
-                    // Дополнительная информация из ответа (если есть)
-                    if (responseText) {
-                        try {
-                            const result = JSON.parse(responseText);
-                            if (result.order_uid) {
-                                successDiv.innerHTML += `<br>UID: ${result.order_uid}`;
-                            }
-                        } catch {
-                            successDiv.innerHTML += `<br>Ответ сервера: ${responseText}`;
+            // ОБРАБОТКА ОТВЕТА - теперь это массив результатов
+            if (responseText) {
+                try {
+                    const results = JSON.parse(responseText);
+                    
+                    if (Array.isArray(results)) {
+                        // Обрабатываем массив результатов
+                        const successCount = results.filter(r => r.status === 'success').length;
+                        const conflictCount = results.filter(r => r.status === 'conflict').length;
+                        const errorCount = results.filter(r => r.status === 'error' || r.status === 'bad_request').length;
+                        
+                        successDiv.innerHTML = `
+                            Обработано заказов: ${results.length}<br>
+                            ✅ Успешно: ${successCount}<br>
+                            ⚠ Дубликатов: ${conflictCount}<br>
+                            ❌ Ошибок: ${errorCount}
+                        `;
+                        
+                        // Показываем UID успешно созданных заказов
+                        const successOrders = results.filter(r => r.status === 'success');
+                        if (successOrders.length > 0) {
+                            successDiv.innerHTML += `<br>Созданные UID: ${successOrders.map(o => o.order_uid).join(', ')}`;
+                        }
+                    } else {
+                        // На случай если ответ не массив (для обратной совместимости)
+                        successDiv.innerHTML = 'Заказ успешно создан!';
+                        if (results.order_uid) {
+                            successDiv.innerHTML += `<br>UID: ${results.order_uid}`;
                         }
                     }
-
-                } catch (error) {
-                    errorDiv.innerText = `Ошибка: ${error.message.replace('JSON.parse:', '').trim()}`;
-                    errorDiv.style.display = 'block';
+                } catch {
+                    successDiv.innerHTML += `<br>Ответ сервера: ${responseText}`;
                 }
-            });
-        </script>
+            }
+
+        } catch (error) {
+            errorDiv.innerText = `Ошибка: ${error.message.replace('JSON.parse:', '').trim()}`;
+            errorDiv.style.display = 'block';
+        }
+    });
+</script>
 
         <script>
             // Обработчик для формы удаления заказа
