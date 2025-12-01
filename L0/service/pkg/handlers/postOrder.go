@@ -129,7 +129,7 @@ func validateOrder(order *models.Order) error {
 
 	err := validate.Struct(order)
 	if err != nil {
-		// Преобразуем ошибки валидации в читаемый формат
+		// преобразуем ошибки валидации в читаемый формат
 		if validationErrors, ok := err.(validator.ValidationErrors); ok {
 			var errorMessages []string
 			for _, fieldError := range validationErrors {

@@ -16,95 +16,88 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-var (
-	kafkaPortConst       = 9092                   // порт, на котором сидит kafka по умолчанию
-	limitConsumWorkConst = 10800                  // время работы консумера по умолчанию в секундах (3 часа)
-	servicePortConst     = 8081                   // порт принимающего api-сервиса по умолчанию
-	batchSizeConst       = 50                     // количество сообщений в батче по умолчанию
-	batchTimeoutMsConst  = 1000                   // время наполнения батча по умолчанию, мс
-	topicConst           = "my-topic-L0"          // имя топика коррелируется с продюсером
-	groupIDConst         = "my-groupID"           // произвольное в нашем случае имя группы
-	maxRetries           = 3                      // количество повторных попыток связи
-	retryDelayBase       = 100 * time.Millisecond // базовая задержка для попыток связи
-	clientTimeout        = 30 * time.Second       // таймаут для HTTP клиента
+// выносим константы конфигурации по умолчанию, чтобы были на виду
+const (
+	topicNameConst       = "my-topic"   // имя топика, коррелируется с продюсером
+	groupIDNameConst     = "my-groupID" // произвольное в нашем случае имя группы
+	kafkaPortConst       = 9092         // порт, на котором сидит kafka по умолчанию
+	limitConsumWorkConst = 10800        // время работы консумера по умолчанию в секундах (3 часа)
+	servicePortConst     = 8081         // порт принимающего api-сервиса по умолчанию
+	batchSizeConst       = 50           // количество сообщений в батче по умолчанию
+	batchTimeoutMsConst  = 50           // время наполнения батча по умолчанию, мс
+	maxRetriesConst      = 3            // количество повторных попыток связи по умолчанию
+	retryDelayBaseConst  = 100          // базовая задержка для попыток связи по умолчанию
+	clientTimeoutConst   = 30           // таймаут для HTTP клиента по умолчанию
 )
 
-// readSettings проверяет переменные окружения и устанавливает параметры работы
-func readSettings() (int, int, string, int, time.Duration) {
+// SetConsumer описывает настройки с учётом переменных окружения
+type SetConsumer struct {
+	Topic           string        // имя топика (коррелируется с продюсером)
+	GroupID         string        // имя группы
+	KafkaPort       int           // порт, на котором сидит kafka
+	LimitConsumWork time.Duration // время работы консумера в секундах
+	ServicePort     int           // порт принимающего api-сервиса
+	BatchSize       int           // количество сообщений в батче
+	BatchTimeout    time.Duration // время наполнения батча, мс
+	MaxRetries      int           // количество повторных попыток связи
+	RetryDelayBase  time.Duration // базовая задержка для попыток связи
+	ClientTimeout   time.Duration // таймаут для HTTP клиента
+}
 
-	// по умолчанию слушаем брокер на порту kafkaPortConst
-	kafkaPortStr, ok := os.LookupEnv("KAFKA_PORT")
-	if !ok {
-		kafkaPortStr = fmt.Sprintf("%d", kafkaPortConst)
-	}
-	kafkaPort, err := strconv.Atoi(kafkaPortStr)
-	if err != nil {
-		log.Printf("ошибка парсинга kafkaPort, используем значение по умолчанию: %d", kafkaPortConst)
-		kafkaPort = kafkaPortConst
-	}
+// getEnvString проверяет наличие и корректность переменной окружения (строковое значение)
+func getEnvString(envVariable, defaultValue string) string {
 
-	// по умолчанию время работы консумера принимаем
-	limitConsumWorkStr, ok := os.LookupEnv("TIME_LIMIT_CONSUMER")
-	if !ok {
-		limitConsumWorkStr = fmt.Sprintf("%d", limitConsumWorkConst)
-	}
-	timeLimitConsumer, err := strconv.Atoi(limitConsumWorkStr)
-	if err != nil {
-		log.Printf("ошибка парсинга timeLimitConsumer, используем значение по умолчанию: %d", limitConsumWorkConst)
-		timeLimitConsumer = limitConsumWorkConst
+	value, ok := os.LookupEnv(envVariable)
+	if ok {
+		return value
 	}
 
-	// по умолчанию порт хоста для сервиса servicePortConst (доступ в браузере на localhost:servicePortConst)
-	servicePortStr, ok := os.LookupEnv("SERVICE_PORT")
-	if !ok {
-		servicePortStr = fmt.Sprintf("%d", servicePortConst)
-	}
-	servicePort, err := strconv.Atoi(servicePortStr)
-	if err != nil {
-		log.Printf("ошибка парсинга servicePort, используем значение по умолчанию: %d", servicePortConst)
-		servicePort = servicePortConst
-	}
-	// определяем url для HTTP клиента
-	apiUrl := fmt.Sprintf("http://localhost:%d/order", servicePort)
+	return defaultValue
+}
 
-	// по умолчанию количество сообщений в батче == batchSizeConst
-	batchSizeStr, ok := os.LookupEnv("BATCH_SIZE")
-	if !ok {
-		batchSizeStr = fmt.Sprintf("%d", batchSizeConst)
-	}
-	batchSize, err := strconv.Atoi(batchSizeStr)
-	if err != nil {
-		log.Printf("ошибка парсинга batchSize, используем значение по умолчанию: %d", batchSizeConst)
-		batchSize = batchSizeConst
+// getEnvInt проверяет наличие и корректность переменной окружения (числовое значение)
+func getEnvInt(envVariable string, defaultValue int) int {
+
+	value, ok := os.LookupEnv(envVariable)
+	if ok {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			return parsed
+		}
+		log.Printf("ошибка парсинга %s, используем значение по умолчанию: %d", envVariable, defaultValue)
 	}
 
-	// по умолчанию время наполнения батча сообщениями == batchTimeoutMsConst миллисекунд
-	batchTimeoutStr, ok := os.LookupEnv("BATCH_TIMEOUT_MS")
-	if !ok {
-		batchTimeoutStr = fmt.Sprintf("%d", batchTimeoutMsConst)
-	}
-	batchTimeoutMs, err := strconv.Atoi(batchTimeoutStr)
-	if err != nil {
-		log.Printf("ошибка парсинга batchTimeoutMs, используем значение по умолчанию: %dms", batchTimeoutMsConst)
-		batchTimeoutMs = batchTimeoutMsConst
-	}
-	batchTimeout := time.Duration(batchTimeoutMs) * time.Millisecond
+	return defaultValue
+}
 
-	log.Printf("настройки батчирования: размер=%d, таймаут=%v", batchSize, batchTimeout)
+// readConfig уточняет конфигурацию с учётом переменных окружения,
+// проверяет переменные окружения и устанавливает параметры работы
+func readConfig() *SetConsumer {
 
-	return kafkaPort, timeLimitConsumer, apiUrl, batchSize, batchTimeout
+	return &SetConsumer{
+		Topic:           getEnvString("TOPIC_NAME_STR", topicNameConst),
+		GroupID:         getEnvString("GROUP_ID_NAME_STR", groupIDNameConst),
+		KafkaPort:       getEnvInt("KAFKA_PORT_NUM", kafkaPortConst),
+		LimitConsumWork: time.Duration(getEnvInt("TIME_LIMIT_CONSUMER_S", limitConsumWorkConst)) * time.Second,
+		ServicePort:     getEnvInt("SERVICE_PORT_NUM", servicePortConst),
+		BatchSize:       getEnvInt("BATCH_SIZE_NUM", batchSizeConst),
+		BatchTimeout:    time.Duration(getEnvInt("BATCH_TIMEOUT_MS", batchTimeoutMsConst)) * time.Millisecond,
+		MaxRetries:      getEnvInt("MAX_RETRIES_NUM", maxRetriesConst),
+		RetryDelayBase:  time.Duration(getEnvInt("RETRY_DELEY_BASE_MS", retryDelayBaseConst)) * time.Millisecond,
+		ClientTimeout:   time.Duration(getEnvInt("CLIENT_TIMEOUT_S", clientTimeoutConst)) * time.Second,
+	}
 }
 
 // consumer это основной код консумера
-func consumer(ctx context.Context, kafkaPort int, apiUrl string, batchSize int, batchTimeout time.Duration) error {
+func consumer(ctx context.Context, setConfig *SetConsumer) error {
 
 	// ридер из кафки
 	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:  []string{fmt.Sprintf("localhost:%d", kafkaPort)},
-		Topic:    topicConst,
-		GroupID:  groupIDConst,
-		MinBytes: 0,
-		MaxWait:  10 * time.Second,
+		Brokers:  []string{fmt.Sprintf("localhost:%d", setConfig.KafkaPort)},
+		Topic:    setConfig.Topic,
+		GroupID:  setConfig.GroupID,
+		MinBytes: 10000,  // минимальный пакет 10 КБ (3-5 сообщений)
+		MaxBytes: 500000, // максимальный пакет батчей 500 КБ (150-200 сообщений)
+		MaxWait:  setConfig.BatchTimeout,
 	})
 	defer func() {
 		if err := r.Close(); err != nil {
@@ -112,7 +105,7 @@ func consumer(ctx context.Context, kafkaPort int, apiUrl string, batchSize int, 
 		}
 	}()
 
-	log.Printf("Консумер подписан на топик '%s' в группе '%s'\n", topicConst, groupIDConst)
+	log.Printf("Консумер подписан на топик '%s' в группе '%s'\n", r.Config().Topic, r.Config().GroupID)
 	log.Println("Начинаем вычитывать !!!")
 
 	// канал для передачи батчей
@@ -121,11 +114,11 @@ func consumer(ctx context.Context, kafkaPort int, apiUrl string, batchSize int, 
 	// запускаем воркеры обработки батчей
 	workerCount := 5
 	for i := 0; i < workerCount; i++ {
-		go batchWorker(ctx, r, batches, apiUrl, i)
+		go batchWorker(ctx, r, batches, setConfig, i)
 	}
 
-	// собираем сообщения в батчи
-	err := collectBatches(ctx, r, batches, batchSize, batchTimeout)
+	// читаем и собираем сообщения в батчи
+	err := collectBatches(ctx, r, batches, setConfig)
 	if err != nil {
 		return fmt.Errorf("ошибка сбора батчей: %w", err)
 	}
@@ -138,10 +131,10 @@ func sendBatchWithRetry(ctx context.Context, apiUrl string, data []byte) (*http.
 
 	// организуем клиента для отправки вычитанных из кафки сообщений на api сервиса
 	httpClient := &http.Client{
-		Timeout: clientTimeout,
+		Timeout: clientTimeoutConst,
 	}
 
-	for attempt := 1; attempt <= maxRetries; attempt++ {
+	for attempt := 1; attempt <= maxRetriesConst; attempt++ {
 
 		// шлём запрос на сервер и получаем ответ
 		resp, err := httpClient.Post(apiUrl, "application/json", bytes.NewReader(data))
@@ -149,13 +142,13 @@ func sendBatchWithRetry(ctx context.Context, apiUrl string, data []byte) (*http.
 			return resp, nil // успешная отправка (закрываем resp.Body далее при обработке)
 		}
 
-		log.Printf("Ошибка сети (попытка %d/%d): %v", attempt, maxRetries, err)
+		log.Printf("Ошибка сети (попытка %d/%d): %v", attempt, maxRetriesConst, err)
 
 		// проверяем номер попытки и делаем паузу перед следующей попыткой
-		if attempt < maxRetries {
+		if attempt < maxRetriesConst {
 
 			// высчитываем увеличивающуюся паузу (200ms, 600ms, 1200ms)
-			delay := retryDelayBase * time.Duration(attempt*attempt+attempt)
+			delay := retryDelayBaseConst * time.Duration(attempt*attempt+attempt)
 			log.Printf("Попытка отправки %v", attempt)
 
 			select {
@@ -168,7 +161,7 @@ func sendBatchWithRetry(ctx context.Context, apiUrl string, data []byte) (*http.
 		}
 	}
 
-	return nil, fmt.Errorf("не удалось отправить запрос после %d попыток", maxRetries)
+	return nil, fmt.Errorf("не удалось отправить запрос после %d попыток", maxRetriesConst)
 }
 
 // handleAPIResponse обрабатывает ответ API и решает коммитить ли сообщение
@@ -211,7 +204,7 @@ func handleAPIResponse(ctx context.Context, r *kafka.Reader, m kafka.Message, re
 	}
 }
 
-func batchWorker(ctx context.Context, r *kafka.Reader, batches <-chan []kafka.Message, apiUrl string, workerID int) {
+func batchWorker(ctx context.Context, r *kafka.Reader, batches <-chan []kafka.Message, setConfig *SetConsumer, workerID int) {
 
 	for batch := range batches {
 		// Подготовка данных для API
@@ -226,11 +219,12 @@ func batchWorker(ctx context.Context, r *kafka.Reader, batches <-chan []kafka.Me
 	}
 }
 
-func collectBatches(ctx context.Context, r *kafka.Reader, batches chan<- []kafka.Message, batchSize int, batchTimeout time.Duration) error {
+func collectBatches(ctx context.Context, r *kafka.Reader, batches chan<- []kafka.Message, setConfig *SetConsumer) error {
 
-	var currentBatch []kafka.Message
-	timer := time.NewTimer(batchTimeout)
+	currentBatch := make([]kafka.Message, 0, setConfig.BatchSize)
+	timer := time.NewTimer(setConfig.BatchTimeout)
 
+loop:
 	for {
 		select {
 		case <-ctx.Done():
@@ -245,9 +239,9 @@ func collectBatches(ctx context.Context, r *kafka.Reader, batches chan<- []kafka
 			// Таймаут - отправляем накопленное
 			if len(currentBatch) > 0 {
 				batches <- currentBatch
-				currentBatch = make([]kafka.Message, 0, batchSize)
+				currentBatch = make([]kafka.Message, 0, setConfig.BatchSize)
 			}
-			timer.Reset(batchTimeout)
+			timer.Reset(setConfig.BatchTimeout)
 
 		default:
 			// Чтение с коротким таймаутом чтобы не блокировать select
@@ -257,7 +251,7 @@ func collectBatches(ctx context.Context, r *kafka.Reader, batches chan<- []kafka
 					continue // Нет сообщений - продолжаем
 				}
 				if errors.Is(err, context.Canceled) {
-					return nil // Graceful shutdown
+					break loop // Graceful shutdown
 				}
 				log.Printf("Ошибка чтения из Kafka: %v", err)
 				continue
@@ -265,10 +259,10 @@ func collectBatches(ctx context.Context, r *kafka.Reader, batches chan<- []kafka
 
 			// Добавляем в батч
 			currentBatch = append(currentBatch, msg)
-			if len(currentBatch) >= batchSize {
+			if len(currentBatch) >= setConfig.BatchSize {
 				batches <- currentBatch
-				currentBatch = make([]kafka.Message, 0, batchSize)
-				timer.Reset(batchTimeout)
+				currentBatch = make([]kafka.Message, 0, setConfig.BatchSize)
+				timer.Reset(setConfig.BatchTimeout)
 			}
 		}
 	}
@@ -278,10 +272,11 @@ func collectBatches(ctx context.Context, r *kafka.Reader, batches chan<- []kafka
 
 func main() {
 
-	kafkaPort, timeLimitConsumer, apiUrl, batchSize, batchTimeout := readSettings()
+	setConsumer := readConfig()
+	// apiUrl := fmt.Sprintf("http://localhost:%d/order", servicePort)
 
 	// заведём контекст для отмены работы консумера
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeLimitConsumer)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), (*setConsumer).LimitConsumWork)
 	defer cancel()
 
 	// обработка сигналов ОС для graceful shutdown
@@ -296,7 +291,7 @@ func main() {
 	}()
 
 	// запускаем основной код консумера
-	err := consumer(ctx, kafkaPort, apiUrl, batchSize, batchTimeout)
+	err := consumer(ctx, setConsumer)
 	if err != nil {
 		log.Printf("консумер завершился с критической ошибкой: %v", err)
 		os.Exit(1)
