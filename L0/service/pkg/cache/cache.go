@@ -3,10 +3,12 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
@@ -14,46 +16,119 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var Rdb *redis.Client // клиент Redis
+// выносим константы конфигурации по умолчанию, чтобы были на виду
+const (
+	redisPortConst     = "6379" // порт, на котором сидит рэдис по умолчанию
+	redisPasswordConst = ""     // пароль от БД рэдиса по умолчанию
+	redisDBNumberConst = 0      // номер БД рэдиса по умолчанию
+	redisTTLConst      = 600    // время жизни данных в кэше в секундах по умолчанию
+	thresholdConst     = 24     // время в часах за которое берём записи для прогрева кэша
+)
+
+// SetCache описывает настройки с учётом переменных окружения
+type SetCache struct {
+	RedisPort     string        // порт, на котором сидит рэдис
+	RedisPassword string        // пароль от БД рэдиса
+	RedisDBNumber int           // номер БД рэдиса
+	RedisTTL      time.Duration // время жизни данных в кэше в секундах
+}
+
+var (
+	config atomic.Value  // атомарное хранилище для конфигурации
+	Rdb    *redis.Client // клиент Redis
+)
+
+// getEnvString проверяет наличие и корректность переменной окружения (строковое значение)
+func getEnvString(envVariable, defaultValue string) string {
+
+	value, ok := os.LookupEnv(envVariable)
+	if ok {
+		return value
+	}
+
+	return defaultValue
+}
+
+// getEnvInt проверяет наличие и корректность переменной окружения (числовое значение > 0)
+func getEnvInt(envVariable string, defaultValue int) int {
+
+	value, ok := os.LookupEnv(envVariable)
+	if ok {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			return parsed
+		}
+		log.Printf("ошибка парсинга %s, используем значение по умолчанию: %d", envVariable, defaultValue)
+	}
+
+	return defaultValue
+}
+
+// readConfig уточняет конфигурацию с учётом переменных окружения
+func readConfig() *SetCache {
+
+	return &SetCache{
+		RedisPort:     getEnvString("REDIS_PORT", redisPortConst),
+		RedisPassword: getEnvString("REDIS_PASSWORD", redisPasswordConst),
+		RedisDBNumber: getEnvInt("REDIS_DB", redisDBNumberConst),
+		RedisTTL:      time.Duration(getEnvInt("REDIS_TTL", redisTTLConst)) * time.Second,
+	}
+}
+
+// getConfig безопасно получает конфигурацию
+func getConfig() *SetCache {
+
+	if cfg := config.Load(); cfg != nil {
+		return cfg.(*SetCache)
+	}
+	// возвращаем конфигурацию по умолчанию, если ещё не инициализировано
+	return &SetCache{
+		RedisPort:     redisPortConst,
+		RedisPassword: redisPasswordConst,
+		RedisDBNumber: redisDBNumberConst,
+		RedisTTL:      time.Duration(redisTTLConst) * time.Second,
+	}
+}
+
+// updateConfig обновляет конфигурацию (для hot reload в будущем)
+func updateConfig(newConfig *SetCache) {
+
+	config.Store(newConfig)
+}
 
 // InitRedis запускает работу с Redis
 func InitRedis() error {
 
-	// смотрим переменные окружения
-	portRedis, ok := os.LookupEnv("REDIS_PORT")
-	if !ok {
-		portRedis = "6379"
-	}
-	dbRedisStr, ok := os.LookupEnv("REDIS_DB")
-	if !ok {
-		dbRedisStr = "0"
-	}
-	passwordRedis, ok := os.LookupEnv("REDIS_PASSWORD")
-	if !ok {
-		passwordRedis = ""
+	// считываем конфигурацию
+	cfg := readConfig()
+
+	// проверяем номер базы в рэдисе
+	if cfg.RedisDBNumber < 0 || 16 < cfg.RedisDBNumber {
+		log.Printf("Проверьте .env файл, ошибка назначения базы данных Redis. Ожидается значение: 0 ... 16. Получено: %d\n", cfg.RedisDBNumber)
+		log.Printf("Используется значение по умолчанию: %d\n", redisDBNumberConst)
+		cfg.RedisDBNumber = redisDBNumberConst
 	}
 
-	// переведём в int номер базы в Redis
-	dbRedis, err := strconv.Atoi(dbRedisStr)
-	if err != nil || dbRedis < 0 || dbRedis > 16 {
-		log.Printf("проверьте .env файл, ошибка назначения базы данных Redis: %v\n", err)
-		return err
+	// проверяем время жизни данных в кэше
+	if cfg.RedisTTL < 0 {
+		log.Printf("Проверьте .env файл, ошибка назначения TTL для Redis. Ожидается положительное значение. Получено: %d\n", cfg.RedisTTL)
+		log.Printf("Используется значение по умолчанию: %dс.\n", redisTTLConst)
+		cfg.RedisTTL = time.Duration(redisTTLConst) * time.Second
 	}
 
-	// узнаем время жизни данных в кэше
-	ttl := GetTTL()
+	// атомарно сохраняем конфигурацию
+	updateConfig(cfg)
 
 	// заводим клиента Redis
 	Rdb = redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%s", "redis", portRedis),
-		Password: passwordRedis,
-		DB:       dbRedis,
+		Addr:     fmt.Sprintf("%s:%s", "redis", cfg.RedisPort),
+		Password: cfg.RedisPassword,
+		DB:       cfg.RedisDBNumber,
 	})
 
 	log.Println("Клиент Redis запущен.")
 
 	// проверяем подключение
-	if err = Rdb.Ping(context.Background()).Err(); err != nil {
+	if err := Rdb.Ping(context.Background()).Err(); err != nil {
 		log.Printf("ошибка подключения к Redis: %v\n", err)
 		return err
 	}
@@ -62,7 +137,7 @@ func InitRedis() error {
 	log.Println("Начинаем загрузку первичных данных в кэш.")
 
 	// загружаем начальные данные
-	err = loadDataToCache(time.Duration(ttl) * time.Second)
+	err := loadDataToCache()
 	if err != nil {
 		log.Printf("ошибка загрузки первичных данных в кэш: %v", err)
 		return err
@@ -73,31 +148,17 @@ func InitRedis() error {
 	return nil
 }
 
-// GetTTL определяет время жизни данных в кэше
+// GetTTL определяет время жизни данных в кэше (для postOrder понадобится)
 func GetTTL() time.Duration {
 
-	// смотрим переменную окружения
-	ttlStr, ok := os.LookupEnv("REDIS_TTL")
-	if !ok {
-		ttlStr = "600" // по умолчанию примем 10 минут
-	}
-
-	ttl, err := strconv.Atoi(ttlStr)
-	if err != nil || ttl < 0 {
-		log.Printf("Проверьте .env файл, ошибка назначения времени жизни данных в Redis. Используется значение по умолчанию.")
-		return 600 * time.Second
-	}
-
-	return time.Duration(ttl) * time.Second
+	return getConfig().RedisTTL
 }
 
 // loadDataToCache загружает данные за последнее время в кэш при старте
-func loadDataToCache(ttl time.Duration) error {
+func loadDataToCache() error {
 
-	// по умочанию установим временной порог, например, 24 часа
-	threshold := 24
-
-	timeThreshold := time.Now().Add(-time.Duration(threshold) * time.Hour)
+	// устанавливаем временной порог (например, 24 часа)
+	timeThreshold := time.Now().Add(-time.Duration(thresholdConst) * time.Hour)
 
 	// получаем заказы до установленного порога
 	var orders []models.Order
@@ -111,13 +172,15 @@ func loadDataToCache(ttl time.Duration) error {
 		return fmt.Errorf("ошибка при получении заказов: %v", err)
 	}
 
-	log.Printf("Найдено %d заказов за последние %v часа", len(orders), threshold)
+	log.Printf("Найдено %d заказов за последние %v часа", len(orders), thresholdConst)
 
 	// сохраняем данные в redis
+	keyValues := make(map[string]interface{})
 	for _, order := range orders {
-		if err := SetCahe(fmt.Sprintf("order:%s", order.OrderUID), order, ttl); err != nil {
-			log.Printf("ошибка кэширования заказа %s при старте: %v", order.OrderUID, err)
-		}
+		keyValues[fmt.Sprintf("order:%s", order.OrderUID)] = order
+	}
+	if err := BatchSet(keyValues); err != nil {
+		log.Printf("Ошибка группового кэширования при старте: %v", err)
 	}
 
 	return nil
@@ -126,21 +189,154 @@ func loadDataToCache(ttl time.Duration) error {
 // GetCache получает запись из кэша
 func GetCache(key string) ([]byte, error) {
 
+	if Rdb == nil {
+		return nil, fmt.Errorf("ошибка при получении записи из кэша: Redis клиент не инициализирован")
+	}
+
 	return Rdb.Get(context.Background(), key).Bytes()
 }
 
 // SetCahe сохраняет запись в кэш
-func SetCahe(key string, value interface{}, ttl time.Duration) error {
+func SetCahe(key string, value interface{}) error {
+
+	if Rdb == nil {
+		return fmt.Errorf("ошибка при сохранении записи в кэш: Redis клиент не инициализирован")
+	}
 
 	jsonData, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("ошибка сериализации данных при добавлении в кэш: %w", err)
 	}
-	return Rdb.Set(context.Background(), key, jsonData, ttl).Err()
+
+	return Rdb.Set(context.Background(), key, jsonData, GetTTL()).Err()
 }
 
 // DelCache удаляет запись из кэша
 func DelCache(key string) error {
 
+	if Rdb == nil {
+		return fmt.Errorf("ошибка при удалении записи из кэша: Redis клиент не инициализирован")
+	}
+
 	return Rdb.Del(context.Background(), key).Err()
+}
+
+// BatchGetKeys проверяет существование нескольких ключей в кэше за один запрос, возвращает map[ключ]существует ли
+func BatchGetKeys(keys []string) (map[string]bool, error) {
+
+	if Rdb == nil {
+		return nil, fmt.Errorf("ошибка BatchGetKeys при получении записи из кэша: Redis клиент не инициализирован")
+	}
+
+	ctx := context.Background()
+
+	result := make(map[string]bool)
+	if len(keys) == 0 {
+		return result, nil
+	}
+
+	// используем pipeline для отправки всех команд разом
+	pipe := Rdb.Pipeline()
+	cmds := make([]*redis.IntCmd, len(keys))
+
+	// подготавливаем команды Exists для каждого ключа
+	for i, key := range keys {
+		cmds[i] = pipe.Exists(ctx, key)
+	}
+
+	// выполняем все команды разом
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка выполнения pipeline запроса в кэше: %w", err)
+	}
+
+	// обрабатываем результаты
+	for i, cmd := range cmds {
+		count, err := cmd.Result()
+		if err != nil {
+			// логируем ошибку, но продолжаем обработку других ключей
+			log.Printf("Ошибка проверки ключа в кэше %s: %v", keys[i], err)
+			result[keys[i]] = false
+		} else {
+			result[keys[i]] = count > 0
+		}
+	}
+
+	return result, nil
+}
+
+// BatchSet сохраняет несколько записей в кэш за один запрос
+func BatchSet(keyValues map[string]interface{}) error {
+
+	if Rdb == nil {
+		return fmt.Errorf("ошибка BatchSet при сохранении записи в кэш: Redis клиент не инициализирован")
+	}
+
+	ctx := context.Background()
+
+	if len(keyValues) == 0 {
+		return nil
+	}
+
+	pipe := Rdb.Pipeline()
+
+	// подготавливаем команды SET для каждой пары ключ-значение
+	for key, value := range keyValues {
+		jsonData, err := json.Marshal(value)
+		if err != nil {
+			return fmt.Errorf("ошибка сериализации в кэше для ключа %s: %w", key, err)
+		}
+		pipe.Set(ctx, key, jsonData, GetTTL())
+	}
+
+	// выполняем все команды разом
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("ошибка выполнения pipeline для множественной записи в кэше: %w", err)
+	}
+
+	return nil
+}
+
+// BatchGet получает значения нескольких ключей (если нужно не только проверять существование)
+func BatchGet(keys []string) (map[string][]byte, error) {
+
+	if Rdb == nil {
+		return nil, fmt.Errorf("ошибка BatchGet при получении записи из кэша: Redis клиент не инициализирован")
+	}
+
+	ctx := context.Background()
+
+	result := make(map[string][]byte)
+	if len(keys) == 0 {
+		return result, nil
+	}
+
+	pipe := Rdb.Pipeline()
+	cmds := make([]*redis.StringCmd, len(keys))
+
+	// подготавливаем команды GET для каждого ключа
+	for i, key := range keys {
+		cmds[i] = pipe.Get(ctx, key)
+	}
+
+	// выполняем все команды разом
+	_, err := pipe.Exec(ctx)
+	if err != nil && !errors.Is(err, redis.Nil) {
+		// игнорируем redis.Nil (ключ не найден) - это нормально
+		return nil, fmt.Errorf("ошибка выполнения pipeline запроса в кэше: %w", err)
+	}
+
+	// обрабатываем результаты
+	for i, cmd := range cmds {
+		val, err := cmd.Result()
+		if err == nil {
+			result[keys[i]] = []byte(val)
+		} else if !errors.Is(err, redis.Nil) {
+			// логируем только настоящие ошибки (не "ключ не найден")
+			log.Printf("Ошибка получения ключа в кэше %s: %v", keys[i], err)
+		}
+	}
+
+	return result, nil
 }
