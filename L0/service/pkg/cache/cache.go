@@ -25,8 +25,8 @@ const (
 	thresholdConst     = 24     // время в часах за которое берём записи для прогрева кэша
 )
 
-// SetCache описывает настройки с учётом переменных окружения
-type SetCache struct {
+// CacheConfig описывает настройки с учётом переменных окружения
+type CacheConfig struct {
 	RedisPort     string        // порт, на котором сидит рэдис
 	RedisPassword string        // пароль от БД рэдиса
 	RedisDBNumber int           // номер БД рэдиса
@@ -64,9 +64,9 @@ func getEnvInt(envVariable string, defaultValue int) int {
 }
 
 // readConfig уточняет конфигурацию с учётом переменных окружения
-func readConfig() *SetCache {
+func readConfig() *CacheConfig {
 
-	return &SetCache{
+	return &CacheConfig{
 		RedisPort:     getEnvString("REDIS_PORT", redisPortConst),
 		RedisPassword: getEnvString("REDIS_PASSWORD", redisPasswordConst),
 		RedisDBNumber: getEnvInt("REDIS_DB", redisDBNumberConst),
@@ -75,13 +75,13 @@ func readConfig() *SetCache {
 }
 
 // getConfig безопасно получает конфигурацию
-func getConfig() *SetCache {
+func getConfig() *CacheConfig {
 
 	if cfg := config.Load(); cfg != nil {
-		return cfg.(*SetCache)
+		return cfg.(*CacheConfig)
 	}
 	// возвращаем конфигурацию по умолчанию, если ещё не инициализировано
-	return &SetCache{
+	return &CacheConfig{
 		RedisPort:     redisPortConst,
 		RedisPassword: redisPasswordConst,
 		RedisDBNumber: redisDBNumberConst,
@@ -90,7 +90,7 @@ func getConfig() *SetCache {
 }
 
 // updateConfig обновляет конфигурацию (для hot reload в будущем)
-func updateConfig(newConfig *SetCache) {
+func updateConfig(newConfig *CacheConfig) {
 
 	config.Store(newConfig)
 }
@@ -172,7 +172,7 @@ func loadDataToCache() error {
 		return fmt.Errorf("ошибка при получении заказов: %v", err)
 	}
 
-	log.Printf("Найдено %d заказов за последние %v часа", len(orders), thresholdConst)
+	log.Printf("Найдено %d заказов за последние %d часа", len(orders), thresholdConst)
 
 	// сохраняем данные в redis
 	keyValues := make(map[string]interface{})
@@ -196,8 +196,8 @@ func GetCache(key string) ([]byte, error) {
 	return Rdb.Get(context.Background(), key).Bytes()
 }
 
-// SetCahe сохраняет запись в кэш
-func SetCahe(key string, value interface{}) error {
+// SetCache сохраняет запись в кэш
+func SetCache(key string, value interface{}) error {
 
 	if Rdb == nil {
 		return fmt.Errorf("ошибка при сохранении записи в кэш: Redis клиент не инициализирован")

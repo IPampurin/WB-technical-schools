@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -30,8 +31,10 @@ const (
 	clientTimeoutConst   = 30           // таймаут для HTTP клиента по умолчанию
 )
 
-// SetConsumer описывает настройки с учётом переменных окружения
-type SetConsumer struct {
+var config atomic.Value // атомарное хранилище для конфигурации
+
+// ConsumerConfig описывает настройки с учётом переменных окружения
+type ConsumerConfig struct {
 	Topic           string        // имя топика (коррелируется с продюсером)
 	GroupID         string        // имя группы
 	KafkaPort       int           // порт, на котором сидит kafka
@@ -71,9 +74,9 @@ func getEnvInt(envVariable string, defaultValue int) int {
 
 // readConfig уточняет конфигурацию с учётом переменных окружения,
 // проверяет переменные окружения и устанавливает параметры работы
-func readConfig() *SetConsumer {
+func readConfig() *ConsumerConfig {
 
-	return &SetConsumer{
+	return &ConsumerConfig{
 		Topic:           getEnvString("TOPIC_NAME_STR", topicNameConst),
 		GroupID:         getEnvString("GROUP_ID_NAME_STR", groupIDNameConst),
 		KafkaPort:       getEnvInt("KAFKA_PORT_NUM", kafkaPortConst),
@@ -87,17 +90,44 @@ func readConfig() *SetConsumer {
 	}
 }
 
+// getConfig безопасно получает конфигурацию
+func getConfig() *ConsumerConfig {
+
+	if cfg := config.Load(); cfg != nil {
+		return cfg.(*ConsumerConfig)
+	}
+	// возвращаем конфигурацию по умолчанию, если ещё не инициализировано
+	return &ConsumerConfig{
+		Topic:           topicNameConst,
+		GroupID:         groupIDNameConst,
+		KafkaPort:       kafkaPortConst,
+		LimitConsumWork: time.Duration(limitConsumWorkConst) * time.Second,
+		ServicePort:     servicePortConst,
+		BatchSize:       batchSizeConst,
+		BatchTimeout:    time.Duration(batchTimeoutMsConst) * time.Millisecond,
+		MaxRetries:      maxRetriesConst,
+		RetryDelayBase:  time.Duration(retryDelayBaseConst) * time.Millisecond,
+		ClientTimeout:   time.Duration(clientTimeoutConst) * time.Second,
+	}
+}
+
+// updateConfig обновляет конфигурацию (для hot reload в будущем)
+func updateConfig(newConfig *ConsumerConfig) {
+
+	config.Store(newConfig)
+}
+
 // consumer это основной код консумера
-func consumer(ctx context.Context, setConfig *SetConsumer) error {
+func consumer(ctx context.Context, cfg *ConsumerConfig) error {
 
 	// ридер из кафки
 	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:  []string{fmt.Sprintf("localhost:%d", setConfig.KafkaPort)},
-		Topic:    setConfig.Topic,
-		GroupID:  setConfig.GroupID,
+		Brokers:  []string{fmt.Sprintf("localhost:%d", cfg.KafkaPort)},
+		Topic:    cfg.Topic,
+		GroupID:  cfg.GroupID,
 		MinBytes: 10000,  // минимальный пакет 10 КБ (3-5 сообщений)
 		MaxBytes: 500000, // максимальный пакет батчей 500 КБ (150-200 сообщений)
-		MaxWait:  setConfig.BatchTimeout,
+		MaxWait:  cfg.BatchTimeout,
 	})
 	defer func() {
 		if err := r.Close(); err != nil {
@@ -114,11 +144,11 @@ func consumer(ctx context.Context, setConfig *SetConsumer) error {
 	// запускаем воркеры обработки батчей
 	workerCount := 5
 	for i := 0; i < workerCount; i++ {
-		go batchWorker(ctx, r, batches, setConfig, i)
+		go batchWorker(ctx, r, batches, cfg, i)
 	}
 
 	// читаем и собираем сообщения в батчи
-	err := collectBatches(ctx, r, batches, setConfig)
+	err := collectBatches(ctx, r, batches, cfg)
 	if err != nil {
 		return fmt.Errorf("ошибка сбора батчей: %w", err)
 	}
@@ -204,7 +234,7 @@ func handleAPIResponse(ctx context.Context, r *kafka.Reader, m kafka.Message, re
 	}
 }
 
-func batchWorker(ctx context.Context, r *kafka.Reader, batches <-chan []kafka.Message, setConfig *SetConsumer, workerID int) {
+func batchWorker(ctx context.Context, r *kafka.Reader, batches <-chan []kafka.Message, setConfig *ConsumerConfig, workerID int) {
 
 	for batch := range batches {
 		// Подготовка данных для API
@@ -219,10 +249,10 @@ func batchWorker(ctx context.Context, r *kafka.Reader, batches <-chan []kafka.Me
 	}
 }
 
-func collectBatches(ctx context.Context, r *kafka.Reader, batches chan<- []kafka.Message, setConfig *SetConsumer) error {
+func collectBatches(ctx context.Context, r *kafka.Reader, batches chan<- []kafka.Message, cfg *ConsumerConfig) error {
 
-	currentBatch := make([]kafka.Message, 0, setConfig.BatchSize)
-	timer := time.NewTimer(setConfig.BatchTimeout)
+	currentBatch := make([]kafka.Message, 0, cfg.BatchSize)
+	timer := time.NewTimer(cfg.BatchTimeout)
 
 loop:
 	for {
@@ -239,9 +269,9 @@ loop:
 			// Таймаут - отправляем накопленное
 			if len(currentBatch) > 0 {
 				batches <- currentBatch
-				currentBatch = make([]kafka.Message, 0, setConfig.BatchSize)
+				currentBatch = make([]kafka.Message, 0, cfg.BatchSize)
 			}
-			timer.Reset(setConfig.BatchTimeout)
+			timer.Reset(cfg.BatchTimeout)
 
 		default:
 			// Чтение с коротким таймаутом чтобы не блокировать select
@@ -259,10 +289,10 @@ loop:
 
 			// Добавляем в батч
 			currentBatch = append(currentBatch, msg)
-			if len(currentBatch) >= setConfig.BatchSize {
+			if len(currentBatch) >= cfg.BatchSize {
 				batches <- currentBatch
-				currentBatch = make([]kafka.Message, 0, setConfig.BatchSize)
-				timer.Reset(setConfig.BatchTimeout)
+				currentBatch = make([]kafka.Message, 0, cfg.BatchSize)
+				timer.Reset(cfg.BatchTimeout)
 			}
 		}
 	}
@@ -272,11 +302,16 @@ loop:
 
 func main() {
 
-	setConsumer := readConfig()
+	// считываем конфигурацию
+	cfg := readConfig()
+
+	// сохраняем в atomic.Value (для будущего hot reload)
+	updateConfig(cfg)
+
 	// apiUrl := fmt.Sprintf("http://localhost:%d/order", servicePort)
 
 	// заведём контекст для отмены работы консумера
-	ctx, cancel := context.WithTimeout(context.Background(), (*setConsumer).LimitConsumWork)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.LimitConsumWork)
 	defer cancel()
 
 	// обработка сигналов ОС для graceful shutdown
@@ -291,7 +326,7 @@ func main() {
 	}()
 
 	// запускаем основной код консумера
-	err := consumer(ctx, setConsumer)
+	err := consumer(ctx, cfg)
 	if err != nil {
 		log.Printf("консумер завершился с критической ошибкой: %v", err)
 		os.Exit(1)

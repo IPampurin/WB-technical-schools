@@ -78,7 +78,7 @@ func GetOrderByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// если заказ в базе есть и штатно получен, то записываем заказ в кэш
-		if err := cache.SetCahe(cacheKey, order); err != nil {
+		if err := cache.SetCache(cacheKey, order); err != nil {
 			log.Printf("Ошибка кэширования при запросе по uid: %v", err)
 		}
 

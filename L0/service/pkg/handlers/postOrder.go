@@ -379,13 +379,12 @@ func saveOrdersBatch(orders []*models.Order) map[string]OrderResponse {
 			keyValues[key] = order
 		}
 
-		ttl := cache.GetTTL()
-		if err := cache.BatchSet(keyValues, ttl); err != nil {
+		if err := cache.BatchSet(keyValues); err != nil {
 			log.Printf("Ошибка группового кэширования: %v", err)
 			// fallback: сохраняем по одному
 			for _, order := range orders {
 				cacheKey := fmt.Sprintf("order:%s", order.OrderUID)
-				if err := cache.SetCahe(cacheKey, order, ttl); err != nil {
+				if err := cache.SetCache(cacheKey, order); err != nil {
 					log.Printf("Ошибка кэширования заказа %s: %v", order.OrderUID, err)
 				}
 			}
