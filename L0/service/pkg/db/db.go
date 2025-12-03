@@ -155,7 +155,7 @@ func createDeliveriesTable(db *gorm.DB) error {
 		
 		-- создаем индексы для ускорения JOIN-запросов
 		CREATE INDEX IF NOT EXISTS idx_deliveries_order_id ON deliveries(order_id);
-		CREATE INDEX IF NOT EXISTS idx_deliveries_email ON deliveries(email);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_deliveries_email_active ON deliveries(email) WHERE deleted_at IS NULL;
 		CREATE INDEX IF NOT EXISTS idx_deliveries_deleted_at ON deliveries(deleted_at);
 	`
 
@@ -173,7 +173,7 @@ func createPaymentsTable(db *gorm.DB) error {
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,           -- метка времени обновления (gorm.Model)
 			deleted_at TIMESTAMP NULL,                                -- мягкое удаление (gorm.Model)
 			order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE, -- связь с заказом
-			transaction VARCHAR(255) UNIQUE NOT NULL,                 -- уникальный идентификатор транзакции
+			transaction VARCHAR(255) NOT NULL,           		      -- идентификатор транзакции
 			request_id VARCHAR(255),                                  -- идентификатор запроса платежа
 			currency VARCHAR(3) NOT NULL,                             -- валюта платежа (USD, RUB и т.д.)
 			provider VARCHAR(50) NOT NULL,                            -- провайдер платежной системы
@@ -187,7 +187,7 @@ func createPaymentsTable(db *gorm.DB) error {
 		
 		-- создаем индексы для быстрого поиска по заказам и транзакциям
 		CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payments(order_id);
-		CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_transaction ON payments(transaction);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_transaction_active ON payments(transaction) WHERE deleted_at IS NULL;
 		CREATE INDEX IF NOT EXISTS idx_payments_deleted_at ON payments(deleted_at);
 	`
 

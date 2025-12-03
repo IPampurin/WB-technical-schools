@@ -199,50 +199,71 @@
                     }
 
                     // Успешное создание
-            successDiv.style.display = 'block';
-            textarea.value = '';
+                    successDiv.style.display = 'block';
+                    textarea.value = '';
 
-            // ОБРАБОТКА ОТВЕТА - теперь это массив результатов
-            if (responseText) {
-                try {
-                    const results = JSON.parse(responseText);
+                    // ОБРАБОТКА ОТВЕТА - теперь это массив результатов
+                    if (responseText) {
+                        try {
+                            const results = JSON.parse(responseText);
                     
-                    if (Array.isArray(results)) {
-                        // Обрабатываем массив результатов
-                        const successCount = results.filter(r => r.status === 'success').length;
-                        const conflictCount = results.filter(r => r.status === 'conflict').length;
-                        const errorCount = results.filter(r => r.status === 'error' || r.status === 'bad_request').length;
+                            if (Array.isArray(results)) {
+                                // Обрабатываем массив результатов
+                                const successCount = results.filter(r => r.status === 'success').length;
+                                const conflictCount = results.filter(r => r.status === 'conflict').length;
+                                const errorCount = results.filter(r => r.status === 'error' || r.status === 'bad_request').length;
                         
-                        successDiv.innerHTML = `
-                            Обработано заказов: ${results.length}<br>
-                            ✅ Успешно: ${successCount}<br>
-                            ⚠ Дубликатов: ${conflictCount}<br>
-                            ❌ Ошибок: ${errorCount}
-                        `;
+                                successDiv.innerHTML = `
+                                    Обработано заказов: ${results.length}<br>
+                                    Успешно: ${successCount}<br>
+                                    Дубликатов: ${conflictCount}<br>
+                                    Ошибок: ${errorCount}
+                                `;
                         
-                        // Показываем UID успешно созданных заказов
-                        const successOrders = results.filter(r => r.status === 'success');
-                        if (successOrders.length > 0) {
-                            successDiv.innerHTML += `<br>Созданные UID: ${successOrders.map(o => o.order_uid).join(', ')}`;
-                        }
-                    } else {
-                        // На случай если ответ не массив (для обратной совместимости)
-                        successDiv.innerHTML = 'Заказ успешно создан!';
-                        if (results.order_uid) {
-                            successDiv.innerHTML += `<br>UID: ${results.order_uid}`;
+                                // Если есть ошибки - показываем детали
+                                if (errorCount > 0) {
+                                    const errorOrders = results.filter(r => r.status === 'error' || r.status === 'bad_request');
+                                    successDiv.innerHTML += `<br><br><strong>Детали ошибок:</strong>`;
+                                    errorOrders.forEach((order, index) => {
+                                        successDiv.innerHTML += `<br>${index + 1}. ${order.order_uid}: ${order.message}`;
+                                    });
+                                }
+                        
+                                // Показываем дубликаты (если есть)
+                                if (conflictCount > 0) {
+                                    const conflictOrders = results.filter(r => r.status === 'conflict');
+                                    successDiv.innerHTML += `<br><br><strong>Дубликаты:</strong>`;
+                                    conflictOrders.forEach((order, index) => {
+                                        successDiv.innerHTML += `<br>${index + 1}. ${order.order_uid}: ${order.message}`;
+                                    });
+                                }
+                        
+                                // Показываем UID успешно созданных заказов
+                                const successOrders = results.filter(r => r.status === 'success');
+                                if (successOrders.length > 0) {
+                                    successDiv.innerHTML += `<br><br><strong>Созданные заказы:</strong>`;
+                                    successOrders.forEach((order, index) => {
+                                        successDiv.innerHTML += `<br>${index + 1}. ${order.order_uid}`;
+                                    });
+                                }
+                            } else {
+                                // На случай если ответ не массив (для обратной совместимости)
+                                successDiv.innerHTML = 'Заказ успешно создан!';
+                                if (results.order_uid) {
+                                    successDiv.innerHTML += `<br>UID: ${results.order_uid}`;
+                                }
+                            }
+                        } catch {
+                            successDiv.innerHTML += `<br>Ответ сервера: ${responseText}`;
                         }
                     }
-                } catch {
-                    successDiv.innerHTML += `<br>Ответ сервера: ${responseText}`;
-                }
-            }
 
-        } catch (error) {
-            errorDiv.innerText = `Ошибка: ${error.message.replace('JSON.parse:', '').trim()}`;
-            errorDiv.style.display = 'block';
-        }
-    });
-</script>
+                } catch (error) {
+                    errorDiv.innerText = `Ошибка: ${error.message.replace('JSON.parse:', '').trim()}`;
+                    errorDiv.style.display = 'block';
+                }
+            });
+        </script>
 
         <script>
             // Обработчик для формы удаления заказа
