@@ -109,8 +109,7 @@ func createOrdersTable(db *gorm.DB) error {
 			id SERIAL PRIMARY KEY,                            -- автоинкрементный идентификатор
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,   -- метка времени создания записи (gorm.Model)
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,   -- метка времени обновления записи (gorm.Model)
-			deleted_at TIMESTAMP NULL,                        -- мягкое удаление (gorm.Model)
-			order_uid VARCHAR(255) UNIQUE NOT NULL,           -- уникальный идентификатор заказа (из JSON)
+			order_uid VARCHAR(255) UNIQUE NOT NULL,	          -- уникальный идентификатор заказа (из JSON)
 			track_number VARCHAR(255),                        -- трек-номер для отслеживания
 			entry VARCHAR(50),                                -- код входа (например, WBIL)
 			locale VARCHAR(10),                               -- локаль (язык) заказа
@@ -124,10 +123,9 @@ func createOrdersTable(db *gorm.DB) error {
 		);
 		
 		-- создаем индексы для оптимизации запросов
-		CREATE INDEX IF NOT EXISTS idx_orders_order_uid ON orders(order_uid);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_order_uid ON orders(order_uid);
 		CREATE INDEX IF NOT EXISTS idx_orders_track_number ON orders(track_number);
 		CREATE INDEX IF NOT EXISTS idx_orders_date_created ON orders(date_created);
-		CREATE INDEX IF NOT EXISTS idx_orders_deleted_at ON orders(deleted_at);
 	`
 
 	return db.Exec(sql).Error
@@ -142,7 +140,6 @@ func createDeliveriesTable(db *gorm.DB) error {
 			id SERIAL PRIMARY KEY,                                    -- автоинкрементный идентификатор
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,           -- метка времени создания (gorm.Model)
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,           -- метка времени обновления (gorm.Model)
-			deleted_at TIMESTAMP NULL,                                -- мягкое удаление (gorm.Model)
 			order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE, -- связь с заказом
 			name VARCHAR(100) NOT NULL,                               -- имя получателя
 			phone VARCHAR(20) NOT NULL,                               -- телефон получателя
@@ -155,8 +152,7 @@ func createDeliveriesTable(db *gorm.DB) error {
 		
 		-- создаем индексы для ускорения JOIN-запросов
 		CREATE INDEX IF NOT EXISTS idx_deliveries_order_id ON deliveries(order_id);
-		CREATE UNIQUE INDEX IF NOT EXISTS idx_deliveries_email_active ON deliveries(email) WHERE deleted_at IS NULL;
-		CREATE INDEX IF NOT EXISTS idx_deliveries_deleted_at ON deliveries(deleted_at);
+		CREATE INDEX IF NOT EXISTS idx_deliveries_email ON deliveries(email);
 	`
 
 	return db.Exec(sql).Error
@@ -171,7 +167,6 @@ func createPaymentsTable(db *gorm.DB) error {
 			id SERIAL PRIMARY KEY,                                    -- автоинкрементный идентификатор
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,           -- метка времени создания (gorm.Model)
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,           -- метка времени обновления (gorm.Model)
-			deleted_at TIMESTAMP NULL,                                -- мягкое удаление (gorm.Model)
 			order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE, -- связь с заказом
 			transaction VARCHAR(255) NOT NULL,           		      -- идентификатор транзакции
 			request_id VARCHAR(255),                                  -- идентификатор запроса платежа
@@ -187,8 +182,7 @@ func createPaymentsTable(db *gorm.DB) error {
 		
 		-- создаем индексы для быстрого поиска по заказам и транзакциям
 		CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payments(order_id);
-		CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_transaction_active ON payments(transaction) WHERE deleted_at IS NULL;
-		CREATE INDEX IF NOT EXISTS idx_payments_deleted_at ON payments(deleted_at);
+		CREATE INDEX IF NOT EXISTS idx_payments_transaction ON payments(transaction);
 	`
 
 	return db.Exec(sql).Error
@@ -203,7 +197,6 @@ func createItemsTable(db *gorm.DB) error {
             id SERIAL PRIMARY KEY,                                    -- автоинкрементный идентификатор
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,           -- метка времени создания (gorm.Model)
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,           -- метка времени обновления (gorm.Model)
-            deleted_at TIMESTAMP NULL,                                -- мягкое удаление (gorm.Model)
             order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE, -- связь с заказом
             chrt_id INTEGER NOT NULL,                                 -- идентификатор товара в системе
             track_number VARCHAR(255),                                -- трек-номер товара
@@ -222,7 +215,6 @@ func createItemsTable(db *gorm.DB) error {
         CREATE INDEX IF NOT EXISTS idx_items_order_id ON items(order_id);
         CREATE INDEX IF NOT EXISTS idx_items_chrt_id ON items(chrt_id);
         CREATE INDEX IF NOT EXISTS idx_items_nm_id ON items(nm_id);
-        CREATE INDEX IF NOT EXISTS idx_items_deleted_at ON items(deleted_at);
 	`
 	return db.Exec(sql).Error
 }

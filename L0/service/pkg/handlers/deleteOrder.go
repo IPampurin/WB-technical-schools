@@ -58,20 +58,12 @@ func DeleteOrder(w http.ResponseWriter, r *http.Request) {
 		}
 		tx.Rollback()
 		log.Printf("Ошибка при проверке заказа: %v", result.Error)
-		http.Error(w, "Ошибка при проверке заказа", http.StatusInternalServerError)
+		http.Error(w, "Ошибка при проверке заказа при удалении", http.StatusInternalServerError)
 		return
 	}
 
-	// удаляем связанные данные через сессию
-	if err := session.Model(&order).Association("Items").Clear(); err != nil {
-		tx.Rollback()
-		log.Printf("Ошибка при очистке связанных данных: %v", err)
-		http.Error(w, "Ошибка при удалении связанных данных", http.StatusInternalServerError)
-		return
-	}
-
-	// удаляем сам заказ
-	result = session.Delete(&order)
+	// физически удаляем сам заказ (сработает ON DELETE CASCADE для связанных данных)
+	result = session.Unscoped().Delete(&order)
 	if result.Error != nil {
 		tx.Rollback()
 		log.Printf("Ошибка при удалении заказа: %v", result.Error)
@@ -81,12 +73,12 @@ func DeleteOrder(w http.ResponseWriter, r *http.Request) {
 
 	// проверяем коммит
 	if commitResult := tx.Commit(); commitResult.Error != nil {
-		log.Printf("Ошибка при коммите транзакции: %v", commitResult.Error)
+		log.Printf("Ошибка при коммите транзакции при удалении: %v", commitResult.Error)
 		http.Error(w, "Внутренняя ошибка сервера", http.StatusInternalServerError)
 		return
 	}
 
-	log.Println("Транзакция успешно завершена.")
+	log.Println("Транзакция при удалении успешно завершена.")
 	log.Printf("Заказ с UID %s успешно удален", orderUID)
 
 	// если данный заказ засветился в кэше, срочно удаляем его и оттудова
