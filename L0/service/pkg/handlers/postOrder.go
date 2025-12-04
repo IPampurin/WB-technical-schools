@@ -18,11 +18,11 @@ import (
 
 // OrderResponse структура для ответов по каждому сообщению в батче от консумера
 type OrderResponse struct {
-	OrderUID     string `json:"order_uid"`
-	Status       string `json:"status"` // "success", "conflict", "bad_request", "error"
+	OrderUID     string `json:"orderUID"`
+	Status       string `json:"status"` // "success", "conflict", "badRequest", "error"
 	Message      string `json:"message,omitempty"`
-	ShouldCommit bool   `json:"should_commit"`
-	ShouldDLQ    bool   `json:"should_dlq"`
+	ShouldCommit bool   `json:"shouldCommit"`
+	ShouldDLQ    bool   `json:"shouldDLQ"`
 }
 
 // PostOrder принимает json с информацией о заказе и сохраняет данные в базе
@@ -60,7 +60,7 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 
 	// подготавливаем данные для групповых проверок
 	orderUIDs := make([]string, len(orders))
-	orderMap := make(map[string]*models.Order) // для быстрого доступа по order_uid
+	orderMap := make(map[string]*models.Order) // для быстрого доступа по orderUID
 	cacheKeys := make([]string, len(orders))
 
 	for i, order := range orders {
@@ -107,7 +107,7 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 	if len(validOrders) > 0 {
 		var existingOrders []models.Order
 		// один запрос для всех заказов
-		if err := db.DB.Db.Where("order_uid IN ?", orderUIDs).Find(&existingOrders).Error; err != nil {
+		if err := db.DB.Db.Where("orderUID IN ?", orderUIDs).Find(&existingOrders).Error; err != nil {
 			log.Printf("Ошибка групповой проверки в БД: %v", err)
 		} else {
 			for _, existing := range existingOrders {
@@ -127,7 +127,7 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		if err, ok := validationResults[orderUID]; ok {
 			responses[i] = OrderResponse{
 				OrderUID:     orderUID,
-				Status:       "bad_request",
+				Status:       "badRequest",
 				Message:      err.Error(),
 				ShouldCommit: false,
 				ShouldDLQ:    true,
