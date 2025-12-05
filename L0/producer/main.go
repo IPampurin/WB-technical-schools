@@ -277,6 +277,7 @@ func createItem() Item {
 
 // messageGenerate организует псевдослучайные данные для передачи брокеру
 func messageGenerate(count int) [][]byte {
+
 	testMsg := make([][]byte, count)
 
 	for i := 0; i < count; i++ {
