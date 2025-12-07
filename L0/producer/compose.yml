@@ -6,5 +6,5 @@ services:
       context: .
       dockerfile: Dockerfile
     image: my-producer  
-    command: ["./producer-L0"]
+    command: ["./producer"]
     network_mode: "host"

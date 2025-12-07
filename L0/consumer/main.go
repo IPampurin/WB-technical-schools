@@ -28,7 +28,7 @@ const (
 	kafkaPortConst       = 9092           // порт, на котором сидит kafka по умолчанию
 	limitConsumWorkConst = 10800          // время работы консумера по умолчанию в секундах (3 часа)
 	servicePortConst     = 8081           // порт принимающего api-сервиса по умолчанию
-	batchSizeConst       = 50             // количество сообщений в батче по умолчанию
+	batchSizeConst       = 500            // количество сообщений в батче по умолчанию
 	batchTimeoutMsConst  = 50             // время наполнения батча по умолчанию, мс
 	maxRetriesConst      = 3              // количество повторных попыток отправки батчей в api по умолчанию
 	retryDelayBaseConst  = 100            // базовая задержка для попыток отправки по умолчанию
@@ -39,7 +39,7 @@ const (
 
 // OrderResponse структура для ответов из api (копия из postOrders.go)
 type OrderResponse struct {
-	OrderUID     string `json:"orderUID"`          // идентификатор сообщения
+	OrderUID     string `json:"order_uid"`         // идентификатор сообщения
 	Status       string `json:"status"`            // статус: "success", "conflict", "badRequest", "error"
 	Message      string `json:"message,omitempty"` // информация об ошибке
 	ShouldCommit bool   `json:"shouldCommit"`      // можно ли коммитить в кафке

@@ -17,8 +17,8 @@ import (
 )
 
 var (
-	topic          = "my-topic-L0"          // имя топика, в который пишем сообщения
-	countMessage   = 10                     // количество тестовых джасончиков
+	topic          = "my-topic"             // имя топика, в который пишем сообщения
+	countMessage   = 10000                  // количество тестовых джасончиков
 	maxRetries     = 3                      // количество повторных попыток связи
 	retryDelayBase = 100 * time.Millisecond // базовая задержка для попыток связи
 )
@@ -84,9 +84,13 @@ func main() {
 
 	// определяем продюсер
 	w := &kafka.Writer{
-		Addr:  kafka.TCP("localhost:9092"), // список брокеров
-		Topic: topic,                       // имя топика, в который будем слать сообщения
-		// RequiredAcks: kafka.WaitForLocal	// по умолчанию лидер в кафке подтверждает получение сообщения
+		Addr:         kafka.TCP("localhost:9092"), // список брокеров
+		Topic:        topic,                       // имя топика, в который будем слать сообщения
+		BatchSize:    1000,                        // попробуем получить максимальную скорость
+		BatchBytes:   10 * 1024 * 1024,            // попробуем получить максимальную скорость
+		BatchTimeout: 50 * time.Millisecond,       // попробуем получить максимальную скорость
+		Async:        true,                        // попробуем получить максимальную скорость
+		RequiredAcks: kafka.RequireOne,            // подтверждение от лидера
 	}
 	defer func() {
 		if err := w.Close(); err != nil {

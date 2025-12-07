@@ -18,7 +18,7 @@ import (
 
 // OrderResponse структура для ответов по каждому сообщению в батче от консумера
 type OrderResponse struct {
-	OrderUID     string `json:"orderUID"`          // идентификатор сообщения
+	OrderUID     string `json:"order_uid"`         // идентификатор сообщения
 	Status       string `json:"status"`            // статус: "success", "conflict", "badRequest", "error"
 	Message      string `json:"message,omitempty"` // информация об ошибке
 	ShouldCommit bool   `json:"shouldCommit"`      // можно ли коммитить в кафке
@@ -107,7 +107,7 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 	if len(validOrders) > 0 {
 		var existingOrders []models.Order
 		// один запрос для всех заказов
-		if err := db.DB.Db.Where("orderUID IN ?", orderUIDs).Find(&existingOrders).Error; err != nil {
+		if err := db.DB.Db.Where("order_uid IN ?", orderUIDs).Find(&existingOrders).Error; err != nil {
 			log.Printf("Ошибка групповой проверки в БД: %v", err)
 		} else {
 			for _, existing := range existingOrders {

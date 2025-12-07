@@ -6,7 +6,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o consumer-L0 .
+RUN CGO_ENABLED=0 GOOS=linux go build -o consumer .
 
 FROM alpine:latest
 
@@ -16,6 +16,6 @@ RUN apk --no-cache add ca-certificates tzdata
 
 COPY .env ./
 
-COPY --from=builder /app/consumer-L0 .
+COPY --from=builder /app/consumer .
 
-CMD ["./consumer-L0"]
+CMD ["./consumer"]
