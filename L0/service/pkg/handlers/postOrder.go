@@ -18,11 +18,11 @@ import (
 
 // OrderResponse структура для ответов по каждому сообщению в батче от консумера
 type OrderResponse struct {
-	OrderUID     string `json:"orderUID"`
-	Status       string `json:"status"` // "success", "conflict", "badRequest", "error"
-	Message      string `json:"message,omitempty"`
-	ShouldCommit bool   `json:"shouldCommit"`
-	ShouldDLQ    bool   `json:"shouldDLQ"`
+	OrderUID     string `json:"orderUID"`          // идентификатор сообщения
+	Status       string `json:"status"`            // статус: "success", "conflict", "badRequest", "error"
+	Message      string `json:"message,omitempty"` // информация об ошибке
+	ShouldCommit bool   `json:"shouldCommit"`      // можно ли коммитить в кафке
+	ShouldDLQ    bool   `json:"shouldDLQ"`         // надо ли отправить в DLQ
 }
 
 // PostOrder принимает json с информацией о заказе и сохраняет данные в базе
