@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"math/rand"
 	"os"
 	"os/signal"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -16,52 +18,95 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-var (
-	topic          = "my-topic"             // имя топика, в который пишем сообщения
-	countMessage   = 1000                   // количество тестовых джасончиков
-	maxRetries     = 3                      // количество повторных попыток связи
-	retryDelayBase = 100 * time.Millisecond // базовая задержка для попыток связи
+// выносим константы конфигурации по умолчанию, чтобы были на виду
+
+const (
+	topicNameConst     = "my-topic" // имя топика, коррелируется с консумером
+	kafkaPortConst     = 9092       // порт, на котором сидит kafka по умолчанию
+	massagesCountConst = 100        // количество сообщений, отправляемых одним врайтером, по умолчанию
+	writersCountConst  = 50         // количество врайтеров для имитации отправки "со всех сторон", по умолчанию
 )
 
-// sendWithRetry отправляет сообщения с повторами
-func sendWithRetry(ctx context.Context, w *kafka.Writer, msg kafka.Message, msgNumber int) bool {
+// ProducerConfig описывает настройки с учётом переменных окружения
+type ProducerConfig struct {
+	Topic         string // имя топика (коррелируется с консумером)
+	KafkaPort     int    // порт, на котором сидит kafka
+	MassagesCount int    // количество сообщений, отправляемых одним врайтером
+	WritersCount  int    // количество врайтеров
+}
 
-	for attempt := 1; attempt <= maxRetries; attempt++ {
+// getEnvString проверяет наличие и корректность переменной окружения (строковое значение)
+func getEnvString(envVariable, defaultValue string) string {
 
-		err := w.WriteMessages(ctx, msg)
-		if err == nil {
-			return true // успешная отправка
-		}
-
-		// проверяем отмену контекста
-		if errors.Is(err, context.Canceled) {
-			log.Printf("Отправка прервана на сообщении %d (попытка %d)", msgNumber, attempt)
-			return false
-		}
-
-		log.Printf("Ошибка отправки сообщения №%d (попытка %d/%d): %v", msgNumber, attempt, maxRetries, err)
-
-		// проверяем номер попытки и делаем паузу перед следующей попыткой
-		if attempt < maxRetries {
-
-			// высчитываем увеличивающуюся паузу (200ms, 600ms, 1200ms)
-			delay := retryDelayBase * time.Duration(attempt*attempt+attempt)
-			log.Printf("Повторная отправка сообщения №%d через %v...", msgNumber, delay)
-
-			select {
-			case <-time.After(delay):
-				// продолжаем следующую попытку
-			case <-ctx.Done():
-				log.Printf("Отправка прервана во время ожидания ретрая для сообщения %d", msgNumber)
-				return false
-			}
-		}
+	value, ok := os.LookupEnv(envVariable)
+	if ok {
+		return value
 	}
 
-	// все попытки исчерпаны
-	log.Printf("Сообщение №%d не отправлено после %d попыток", msgNumber, maxRetries)
+	return defaultValue
+}
 
-	return false
+// getEnvInt проверяет наличие и корректность переменной окружения (числовое значение)
+func getEnvInt(envVariable string, defaultValue int) int {
+
+	value, ok := os.LookupEnv(envVariable)
+	if ok {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			return parsed
+		}
+		log.Printf("ошибка парсинга %s, используем значение по умолчанию: %d", envVariable, defaultValue)
+	}
+
+	return defaultValue
+}
+
+// readConfig уточняет конфигурацию с учётом переменных окружения,
+// проверяет переменные окружения и устанавливает параметры работы
+func readConfig() *ProducerConfig {
+
+	return &ProducerConfig{
+		Topic:         getEnvString("TOPIC_NAME_STR", topicNameConst),
+		KafkaPort:     getEnvInt("KAFKA_PORT_NUM", kafkaPortConst),
+		MassagesCount: getEnvInt("MESAGES_COUNT", massagesCountConst),
+		WritersCount:  getEnvInt("WRITERS_COUNT", writersCountConst),
+	}
+}
+
+// sendMessages генерирует и отправляет брокеру заданное количество сообщений
+func sendMessages(ctx context.Context, w *kafka.Writer, cfg *ProducerConfig, generatedCount, countSended, failedCount *int64, wg *sync.WaitGroup) {
+
+	defer wg.Done()
+
+	// генерируем сообщения для отправки
+	messages := messageGenerate(cfg.MassagesCount)
+	if len(messages) == 0 {
+		log.Println("Не сгенерировано ни одного сообщения для отправки.")
+		return
+	}
+
+	atomic.AddInt64(generatedCount, int64(len(messages)))
+
+	// отправляем сообщения с проверкой контекста
+	for i, msgBody := range messages {
+
+		select {
+		default:
+			msg := kafka.Message{
+				Key:   []byte(fmt.Sprintf("Сообщение №%d", i+1)),
+				Value: msgBody,
+				Time:  time.Now(),
+			}
+
+			err := w.WriteMessages(context.Background(), msg)
+			if err != nil {
+				atomic.AddInt64(failedCount, 1)
+			} else {
+				atomic.AddInt64(countSended, 1)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func main() {
@@ -69,8 +114,11 @@ func main() {
 	// инициализируем генератор gofakeit
 	gofakeit.Seed(0)
 
+	// считываем конфигурацию
+	cfg := readConfig()
+
 	// устанавливаем соединение с брокером
-	conn, err := kafka.DialLeader(context.Background(), "tcp", "localhost:9092", topic, 0)
+	conn, err := kafka.DialLeader(context.Background(), "tcp", fmt.Sprintf("localhost:%d", cfg.KafkaPort), cfg.Topic, 0)
 	if err != nil {
 		log.Fatalf("ошибка создания топика кафки: %v\n", err)
 	}
@@ -82,39 +130,28 @@ func main() {
 
 	log.Println("Соединение с брокером установлено.")
 
-	// определяем продюсер
-	w := &kafka.Writer{
-		Addr:         kafka.TCP("localhost:9092"), // список брокеров
-		Topic:        topic,                       // имя топика, в который будем слать сообщения
-		BatchSize:    1000,                        // попробуем получить максимальную скорость
-		BatchBytes:   10 * 1024 * 1024,            // попробуем получить максимальную скорость
-		BatchTimeout: 50 * time.Millisecond,       // попробуем получить максимальную скорость
-		Async:        true,                        // попробуем получить максимальную скорость
-		RequiredAcks: kafka.RequireOne,            // подтверждение от лидера
-	}
-	defer func() {
-		if err := w.Close(); err != nil {
-			log.Printf("Ошибка при закрытии продюсера: %v", err)
+	// создаём ряд врайтеров
+	writers := make([]*kafka.Writer, cfg.WritersCount)
+	for i := 0; i < len(writers); i++ {
+		// определяем продюсер
+		writers[i] = &kafka.Writer{
+			Addr:         kafka.TCP(fmt.Sprintf("localhost:%d", cfg.KafkaPort)), // список брокеров
+			Topic:        cfg.Topic,                                             // имя топика, в который будем слать сообщения
+			Async:        false,                                                 // можно установить true и получить максимальную скорость без гарантии доставки
+			RequiredAcks: kafka.RequireAll,                                      // максимальный контроль доставки (подтверждение от всех реплик)
 		}
-	}()
-
-	log.Println("Начинаем генерировать тестовые данные.")
-
-	// собираем и отправляем тестовые сообщения, если они есть
-	messages := messageGenerate(countMessage)
-	if len(messages) == 0 {
-		log.Println("Не сгенерировано ни одного сообщения для отправки")
-		return
+		defer func() {
+			if err := writers[i].Close(); err != nil {
+				log.Printf("Ошибка при закрытии продюсера: %v", err)
+			}
+		}()
 	}
 
-	log.Printf("Сгенерировано %d сообщений. Начинаем отправку...", len(messages))
-
-	// организуем контекст для корректного завершения продюсера,
-	// например, если мы его в контейнере докера гасим
+	// организуем контекст для корректного завершения писателей
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// обработка сигналов
+	// подготавливаем обработку сигналов ОС
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
@@ -125,44 +162,24 @@ func main() {
 		cancel()
 	}()
 
-	log.Println("Начинаем отправку тестовых данных.")
+	var generatedCount int64 // количество сгенерированных сообщений
+	var countSended int64    // количество отправленных сообщений
+	var failedCount int64    // количество ошибок при отправке сообщений
 
-	sentCount := 0   // количество отправленных сообщений
-	failedCount := 0 // количество ошибок при отправке сообщений
+	log.Printf("Запускаем %d врайтеров.\n", len(writers))
 
-	// отправляем сообщения с проверкой контекста
-	for i, msgBody := range messages {
+	var wg sync.WaitGroup
 
-		// проверяем контекст перед началом обработки каждого сообщения
-		if ctx.Err() != nil {
-			log.Printf("Отправка прервана. Успешно отправлено: %d/%d, не отправлено: %d",
-				sentCount, len(messages), len(messages)-sentCount)
-			return
-		}
-
-		msg := kafka.Message{
-			Key:   []byte(fmt.Sprintf("Сообщение №%d", i+1)),
-			Value: msgBody,
-			Time:  time.Now(),
-		}
-
-		// отправляем сообщение с ретраями
-		success := sendWithRetry(ctx, w, msg, i+1)
-		if success {
-			fmt.Printf("Успешно отправлено сообщение %d: %s\n", i+1, string(msgBody))
-			sentCount++
-		} else {
-			failedCount++
-		}
+	for i := 0; i < len(writers); i++ {
+		wg.Add(1)
+		go sendMessages(ctx, writers[i], cfg, &generatedCount, &countSended, &failedCount, &wg)
 	}
 
-	// финальная запись в логи
-	if failedCount > 0 {
-		log.Printf("Отправка завершена. Успешно: %d/%d, окончательных ошибок: %d",
-			sentCount, len(messages), failedCount)
-	} else {
-		log.Printf("Продюсер успешно отправил все %d сообщений.", sentCount)
-	}
+	wg.Wait()
+
+	log.Println("Врайтеры завершили отправку сообщений брокеру.")
+
+	log.Printf("Сгенерировано сообщений: %d. Отправлено брокеру сообщений: %d. Ошибок при отправке: %d.\n", generatedCount, countSended, failedCount)
 }
 
 // Заказ
@@ -261,6 +278,7 @@ func createPayment() Payment {
 
 // createItem выдаёт экземляр структуры Item
 func createItem() Item {
+
 	price := gofakeit.Price(10, 1000)
 	sale := gofakeit.Float64Range(0, 50)
 
@@ -307,7 +325,7 @@ func messageGenerate(count int) [][]byte {
 			DeliveryService:   gofakeit.RandomString([]string{"meest", "cdek", "dhl", "ups"}),
 			Shardkey:          fmt.Sprintf("%d", gofakeit.Number(0, 9)),
 			SMID:              gofakeit.Number(1, 99),
-			DateCreated:       time.Unix(payment.PaymentDT, 0), // Синхронизируем с PaymentDT
+			DateCreated:       time.Unix(payment.PaymentDT, 0),
 			OOFShard:          fmt.Sprintf("%d", gofakeit.Number(0, 5)),
 		}
 

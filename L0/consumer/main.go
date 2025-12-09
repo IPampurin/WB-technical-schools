@@ -13,15 +13,14 @@ import (
 	"os/signal"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/segmentio/kafka-go"
 )
 
-// выносим константы конфигурации по умолчанию, чтобы были на виду
-
+// выносим константы конфигурации по умолчанию, чтобы были на виду.
+// для работы программы менять в .env
 const (
 	topicNameConst       = "my-topic"     // имя топика, коррелируется с продюсером
 	groupIDNameConst     = "my-groupID"   // произвольное в нашем случае имя группы
@@ -51,8 +50,6 @@ type BatchInfo struct {
 	respOfBatch  []OrderResponse          // ответы по каждому из сообщений батча
 	messageByUID map[string]kafka.Message // мапа идентификации [orderUID]kafka.Message
 }
-
-var config atomic.Value // атомарное хранилище для конфигурации
 
 // ConsumerConfig описывает настройки с учётом переменных окружения
 type ConsumerConfig struct {
@@ -113,37 +110,6 @@ func readConfig() *ConsumerConfig {
 		DlqTopic:        getEnvString("DLQ_TOPIC_NAME_STR", dlqTopicConst),
 		WorkersCount:    getEnvInt("WORKERS_COUNT", workersCountConst),
 	}
-}
-
-/*
-// getConfig безопасно получает конфигурацию
-func getConfig() *ConsumerConfig {
-
-	if cfg := config.Load(); cfg != nil {
-		return cfg.(*ConsumerConfig)
-	}
-	// возвращаем конфигурацию по умолчанию, если ещё не инициализировано
-	return &ConsumerConfig{
-		Topic:           topicNameConst,
-		GroupID:         groupIDNameConst,
-		KafkaPort:       kafkaPortConst,
-		LimitConsumWork: time.Duration(limitConsumWorkConst) * time.Second,
-		ServicePort:     servicePortConst,
-		BatchSize:       batchSizeConst,
-		BatchTimeout:    time.Duration(batchTimeoutMsConst) * time.Millisecond,
-		MaxRetries:      maxRetriesConst,
-		RetryDelayBase:  time.Duration(retryDelayBaseConst) * time.Millisecond,
-		ClientTimeout:   time.Duration(clientTimeoutConst) * time.Second,
-		DlqTopic:        dlqTopicConst,
-		WorkersCount:    workersCountConst,
-	}
-}
-*/
-
-// updateConfig обновляет конфигурацию (для hot reload в будущем)
-func updateConfig(newConfig *ConsumerConfig) {
-
-	config.Store(newConfig)
 }
 
 // consumer это основной код консумера
@@ -609,9 +575,6 @@ func main() {
 
 	// считываем конфигурацию
 	cfg := readConfig()
-
-	// сохраняем в atomic.Value (для будущего hot reload)
-	updateConfig(cfg)
 
 	// заведём контекст для отмены работы консумера
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.LimitConsumWork)
