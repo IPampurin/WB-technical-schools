@@ -47,8 +47,8 @@ type OrderResponse struct {
 
 // BatchInfo объединяет информацию об ответах api по сообщениям с самими сообщениями
 type BatchInfo struct {
-	respOfBatch  []OrderResponse          // ответы по каждому из сообщений батча
-	messageByUID map[string]kafka.Message // мапа идентификации [orderUID]kafka.Message
+	respOfBatch  []OrderResponse           // ответы по каждому из сообщений батча
+	messageByUID map[string]*kafka.Message // мапа идентификации [orderUID]kafka.Message
 }
 
 // ConsumerConfig описывает настройки с учётом переменных окружения
@@ -167,9 +167,9 @@ func consumer(ctx context.Context, cfg *ConsumerConfig, errCh chan<- error, endC
 	log.Println("Начинаем вычитывать !!!")
 
 	// TODO поиграть с размером буферов исходя из ожидаемой пропускной способности пайплайна. Интересно: есть ли какая-то формула?
-	messages := make(chan kafka.Message, cfg.BatchSize*cfg.WorkersCount*10)     // канал для входящих сообщений с большим буфером
-	batches := make(chan []kafka.Message, cfg.WorkersCount*cfg.WorkersCount*10) // канал для передачи батчей
-	responses := make(chan BatchInfo, cfg.WorkersCount*cfg.WorkersCount*10)     // канал передачи ответов по батчам и мап с сообщениями
+	messages := make(chan *kafka.Message, cfg.BatchSize*cfg.WorkersCount*10)     // канал для входящих сообщений с большим буфером
+	batches := make(chan []*kafka.Message, cfg.WorkersCount*cfg.WorkersCount*10) // канал для передачи батчей
+	responses := make(chan *BatchInfo, cfg.WorkersCount*cfg.WorkersCount*10)     // канал передачи ответов по батчам и мап с сообщениями
 
 	// wgPipe для ожидания всех горутин конвейера
 	var wgPipe sync.WaitGroup
@@ -198,7 +198,7 @@ func consumer(ctx context.Context, cfg *ConsumerConfig, errCh chan<- error, endC
 }
 
 // readMsgOfKafka читает сообщения из кафки и наполняет канал messages
-func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messages chan<- kafka.Message, cfg *ConsumerConfig, errCh chan<- error, wgPipe *sync.WaitGroup) {
+func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messages chan<- *kafka.Message, cfg *ConsumerConfig, errCh chan<- error, wgPipe *sync.WaitGroup) {
 
 	defer wgPipe.Done()
 
@@ -245,7 +245,7 @@ func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messages chan<- kafka.
 		inCounter++
 
 		select {
-		case messages <- msg:
+		case messages <- &msg:
 			outCounter++
 		case <-ctx.Done():
 			log.Printf("readMsgOfKafka: считано из kafka %d сообщений, отправлено на батчирование %d сообщений.\n", inCounter, outCounter)
@@ -256,7 +256,7 @@ func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messages chan<- kafka.
 
 // complectBatches собирает батчи из сообщений из messages (по количеству или по времени) и наполняет канал batches,
 // контекст не используем в надежде обработать все уже поступившие сообщения из канала messages
-func complectBatches(messages <-chan kafka.Message, batches chan<- []kafka.Message, cfg *ConsumerConfig, wgPipe *sync.WaitGroup) {
+func complectBatches(messages <-chan *kafka.Message, batches chan<- []*kafka.Message, cfg *ConsumerConfig, wgPipe *sync.WaitGroup) {
 
 	defer wgPipe.Done()
 
@@ -270,8 +270,8 @@ func complectBatches(messages <-chan kafka.Message, batches chan<- []kafka.Messa
 		go func(i int) {
 			defer wg.Done()
 
-			currentBatch := make([]kafka.Message, 0, cfg.BatchSize) // батч с сообщениями
-			ticker := time.NewTicker(cfg.BatchTimeout)              // таймер для отключения комплектования батча по времени
+			currentBatch := make([]*kafka.Message, 0, cfg.BatchSize) // батч с указателями на сообщения
+			ticker := time.NewTicker(cfg.BatchTimeout)               // таймер для отключения комплектования батча по времени
 			defer ticker.Stop()
 
 			inCounter := 0    // счётчик входящих сообщений для воркера
@@ -279,7 +279,7 @@ func complectBatches(messages <-chan kafka.Message, batches chan<- []kafka.Messa
 			batchCounter := 0 // счётчик количества отправленных батчей
 
 			sendBatch := func() {
-				copyBatch := make([]kafka.Message, len(currentBatch))
+				copyBatch := make([]*kafka.Message, len(currentBatch))
 				copy(copyBatch, currentBatch)
 				batches <- copyBatch
 				currentBatch = currentBatch[:0:cfg.BatchSize]
@@ -325,8 +325,8 @@ func complectBatches(messages <-chan kafka.Message, batches chan<- []kafka.Messa
 }
 
 // batchWorker получает батчи и направляет в api, ответы передаёт далее на обработку в канал responses
-func batchWorker(dlqWriter *kafka.Writer, httpClient *http.Client, batches <-chan []kafka.Message,
-	responses chan<- BatchInfo, cfg *ConsumerConfig, wgPipe *sync.WaitGroup) {
+func batchWorker(dlqWriter *kafka.Writer, httpClient *http.Client, batches <-chan []*kafka.Message,
+	responses chan<- *BatchInfo, cfg *ConsumerConfig, wgPipe *sync.WaitGroup) {
 
 	defer wgPipe.Done()
 
@@ -361,7 +361,7 @@ func batchWorker(dlqWriter *kafka.Writer, httpClient *http.Client, batches <-cha
 				// 1. подготавливаем данные для API
 
 				var jsonMessages []json.RawMessage
-				messageMap := make(map[string]kafka.Message) // [orderUID]->message
+				messageMap := make(map[string]*kafka.Message) // [orderUID]->*message
 
 				for _, msg := range batch {
 					// извлекаем orderUID для маппинга
@@ -395,7 +395,7 @@ func batchWorker(dlqWriter *kafka.Writer, httpClient *http.Client, batches <-cha
 				// 3. объединяем ответ по батчу и мапу [orderUID]->message в структуру
 				//    и шлём в канал для обработки в processBatchResponse
 
-				batchInfo := BatchInfo{
+				batchInfo := &BatchInfo{
 					respOfBatch:  response,
 					messageByUID: messageMap,
 				}
@@ -432,10 +432,20 @@ func extractOrderUID(data []byte) string {
 }
 
 // sendToDLQ уточняет заголовок сообщения и отправляет его в DLQ
-func sendToDLQ(w *kafka.Writer, msg kafka.Message, reason string) {
+func sendToDLQ(w *kafka.Writer, msg *kafka.Message, reason string) {
+
+	if msg == nil {
+		log.Println("sendToDLQ: передан nil указатель на сообщение")
+		return
+	}
+
+	keyStr := string(msg.Key)
+	if msg.Key == nil {
+		keyStr = "<nil-key>"
+	}
 
 	dlqMsg := kafka.Message{
-		Key:   []byte(fmt.Sprintf("dlq-%s", string(msg.Key))),
+		Key:   []byte(fmt.Sprintf("dlq-%s", keyStr)),
 		Value: msg.Value,
 		Headers: []kafka.Header{
 			{Key: "original-topic", Value: []byte(msg.Topic)},
@@ -448,7 +458,7 @@ func sendToDLQ(w *kafka.Writer, msg kafka.Message, reason string) {
 
 	// используем пустой контекст с целью обработать все сообщения, которые вычитал ридер в readMsgOfKafka
 	if err := w.WriteMessages(context.Background(), dlqMsg); err != nil {
-		log.Printf("ошибка отправки сообщения %s в DLQ: %v", string(msg.Key), err)
+		log.Printf("ошибка отправки сообщения %s в DLQ: %v", keyStr, err)
 	}
 }
 
@@ -506,7 +516,7 @@ func sendBatchWithRetry(client *http.Client, data []json.RawMessage, cfg *Consum
 }
 
 // processBatchResponse обрабатывает полученные от api ответы по каждому сообщению из батча
-func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responses <-chan BatchInfo, endCh chan struct{}, cfg *ConsumerConfig, wgPipe *sync.WaitGroup) {
+func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responses <-chan *BatchInfo, endCh chan struct{}, cfg *ConsumerConfig, wgPipe *sync.WaitGroup) {
 
 	defer wgPipe.Done()
 
@@ -544,7 +554,7 @@ func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responses <-
 
 					switch {
 					case resp.ShouldCommit:
-						if err := r.CommitMessages(context.Background(), msg); err != nil {
+						if err := r.CommitMessages(context.Background(), *msg); err != nil {
 							log.Printf("processBatchResponse: воркер %d: ошибка коммита сообщения %s: %v", i, string(msg.Key), err)
 						} else {
 							toCommit++

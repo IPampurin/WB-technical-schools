@@ -882,11 +882,11 @@ func runTestConsumer(cfg *ConsumerConfig, brokerAddr, topic, groupID, dlqTopic s
 	}
 
 	// Каналы
-	messages := make(chan kafka.Message, cfg.BatchSize*cfg.WorkersCount*10)
-	batches := make(chan []kafka.Message, cfg.WorkersCount*cfg.WorkersCount*10)
-	responses := make(chan BatchInfo, cfg.WorkersCount*cfg.WorkersCount*10)
+	messages := make(chan *kafka.Message, cfg.BatchSize*cfg.WorkersCount*10)
+	batches := make(chan []*kafka.Message, cfg.WorkersCount*cfg.WorkersCount*10)
+	responses := make(chan *BatchInfo, cfg.WorkersCount*cfg.WorkersCount*10)
 	endCh := make(chan struct{})
-	errCh := make(chan error, 1)
+	errCh := make(chan error)
 
 	// Запускаем пайплайн
 	var wgPipe sync.WaitGroup
