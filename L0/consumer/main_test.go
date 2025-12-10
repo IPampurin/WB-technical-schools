@@ -674,6 +674,7 @@ func TestConsumerAPIIntegration(t *testing.T) {
 		} else {
 			defer os.Unsetenv(envVar)
 		}
+		os.Unsetenv(envVar)
 	}
 
 	// создаем тестовый HTTP-сервер для API
@@ -744,6 +745,15 @@ func TestConsumerAPIIntegration(t *testing.T) {
 	os.Setenv("BATCH_SIZE_NUM", "2")
 	os.Setenv("WORKERS_COUNT", "2")
 
+	cfg = readConfig()
+
+	// Корректируем глобальный cfg для теста
+	cfg.BatchTimeout = 100 * time.Millisecond
+	cfg.MaxRetries = 1
+	cfg.RetryDelayBase = 10 * time.Millisecond
+	cfg.ClientTimeout = 2 * time.Second
+	cfg.LimitConsumWork = 5 * time.Second
+
 	// Записываем тестовые сообщения в Kafka
 	writer := kafka.NewWriter(kafka.WriterConfig{
 		Brokers: []string{brokerAddr},
@@ -763,17 +773,8 @@ func TestConsumerAPIIntegration(t *testing.T) {
 	go func() {
 		defer func() { done <- true }()
 
-		// Создаем конфиг
-		cfg := readConfig()
-
-		// Корректируем настройки для теста
-		cfg.BatchTimeout = 100 * time.Millisecond
-		cfg.MaxRetries = 1
-		cfg.RetryDelayBase = 10 * time.Millisecond
-		cfg.ClientTimeout = 2 * time.Second
-
 		// Запускаем почти консумер
-		runTestConsumer(cfg, brokerAddr, testTopic, testGroupID, testDLQTopic)
+		runTestConsumer(brokerAddr, testTopic, testGroupID, testDLQTopic)
 	}()
 
 	// Ждем завершения консумера
@@ -853,7 +854,8 @@ func TestConsumerAPIIntegration(t *testing.T) {
 }
 
 // runTestConsumer - запускает консумер с исправленной конфигурацией для теста
-func runTestConsumer(cfg *ConsumerConfig, brokerAddr, topic, groupID, dlqTopic string) {
+func runTestConsumer(brokerAddr, topic, groupID, dlqTopic string) {
+
 	// Создаем контекст
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.LimitConsumWork)
 	defer cancel()
@@ -894,22 +896,22 @@ func runTestConsumer(cfg *ConsumerConfig, brokerAddr, topic, groupID, dlqTopic s
 	// 1. читаем сообщения из кафки
 	wgPipe.Add(1)
 	//defer wgPipe.Done()
-	go readMsgOfKafka(ctx, r, messages, cfg, errCh, &wgPipe)
+	go readMsgOfKafka(ctx, r, messages, errCh, &wgPipe)
 
 	// 2. комплектуем батчи
 	wgPipe.Add(1)
 	//defer wgPipe.Done()
-	go complectBatches(messages, batches, cfg, &wgPipe)
+	go complectBatches(messages, batches, &wgPipe)
 
 	// 3. отправляем батчи в API
 	wgPipe.Add(1)
 	//defer wgPipe.Done()
-	go batchWorker(dlqWriter, httpClient, batches, responses, cfg, &wgPipe)
+	go batchWorker(dlqWriter, httpClient, batches, responses, &wgPipe)
 
 	// 4. обрабатываем ответы
 	wgPipe.Add(1)
 	//defer wgPipe.Done()
-	go processBatchResponse(r, dlqWriter, responses, endCh, cfg, &wgPipe)
+	go processBatchResponse(r, dlqWriter, responses, endCh, &wgPipe)
 
 	// Ждем завершения всех этапов
 	wgPipe.Wait()

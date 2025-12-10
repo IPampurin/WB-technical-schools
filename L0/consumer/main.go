@@ -67,6 +67,8 @@ type ConsumerConfig struct {
 	WorkersCount    int           // количество параллельных обработчиков в пайплайне
 }
 
+var cfg *ConsumerConfig
+
 // getEnvString проверяет наличие и корректность переменной окружения (строковое значение)
 func getEnvString(envVariable, defaultValue string) string {
 
@@ -113,7 +115,7 @@ func readConfig() *ConsumerConfig {
 }
 
 // consumer это основной код консумера
-func consumer(ctx context.Context, cfg *ConsumerConfig, errCh chan<- error, endCh chan struct{}) {
+func consumer(ctx context.Context, errCh chan<- error, endCh chan struct{}) {
 
 	// устанавливаем соединение с брокером для автосоздания DLQ
 	conn, err := kafka.DialLeader(context.Background(), "tcp", fmt.Sprintf("localhost:%d", cfg.KafkaPort), cfg.DlqTopic, 0)
@@ -176,19 +178,19 @@ func consumer(ctx context.Context, cfg *ConsumerConfig, errCh chan<- error, endC
 
 	// 1. читаем сообщения из кафки
 	wgPipe.Add(1)
-	go readMsgOfKafka(ctx, r, messages, cfg, errCh, &wgPipe)
+	go readMsgOfKafka(ctx, r, messages, errCh, &wgPipe)
 
 	// 2. комплектуем батчи из прочитанных сообщений
 	wgPipe.Add(1)
-	go complectBatches(messages, batches, cfg, &wgPipe)
+	go complectBatches(messages, batches, &wgPipe)
 
 	// 3. отправляем батчи с ретраем и получаем ответы api с информацией по каждому сообщению
 	wgPipe.Add(1)
-	go batchWorker(dlqWriter, httpClient, batches, responses, cfg, &wgPipe)
+	go batchWorker(dlqWriter, httpClient, batches, responses, &wgPipe)
 
 	// 4. обрабатываем ответы api для каждого сообщения - коммитим или заполняем DLQ
 	wgPipe.Add(1)
-	go processBatchResponse(r, dlqWriter, responses, endCh, cfg, &wgPipe)
+	go processBatchResponse(r, dlqWriter, responses, endCh, &wgPipe)
 
 	// ждём окончания обработки всех считанных readMsgOfKafka сообщений
 	wgPipe.Wait()
@@ -198,7 +200,7 @@ func consumer(ctx context.Context, cfg *ConsumerConfig, errCh chan<- error, endC
 }
 
 // readMsgOfKafka читает сообщения из кафки и наполняет канал messages
-func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messages chan<- *kafka.Message, cfg *ConsumerConfig, errCh chan<- error, wgPipe *sync.WaitGroup) {
+func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messages chan<- *kafka.Message, errCh chan<- error, wgPipe *sync.WaitGroup) {
 
 	defer wgPipe.Done()
 
@@ -256,7 +258,7 @@ func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messages chan<- *kafka
 
 // complectBatches собирает батчи из сообщений из messages (по количеству или по времени) и наполняет канал batches,
 // контекст не используем в надежде обработать все уже поступившие сообщения из канала messages
-func complectBatches(messages <-chan *kafka.Message, batches chan<- []*kafka.Message, cfg *ConsumerConfig, wgPipe *sync.WaitGroup) {
+func complectBatches(messages <-chan *kafka.Message, batches chan<- []*kafka.Message, wgPipe *sync.WaitGroup) {
 
 	defer wgPipe.Done()
 
@@ -326,7 +328,7 @@ func complectBatches(messages <-chan *kafka.Message, batches chan<- []*kafka.Mes
 
 // batchWorker получает батчи и направляет в api, ответы передаёт далее на обработку в канал responses
 func batchWorker(dlqWriter *kafka.Writer, httpClient *http.Client, batches <-chan []*kafka.Message,
-	responses chan<- *BatchInfo, cfg *ConsumerConfig, wgPipe *sync.WaitGroup) {
+	responses chan<- *BatchInfo, wgPipe *sync.WaitGroup) {
 
 	defer wgPipe.Done()
 
@@ -378,7 +380,7 @@ func batchWorker(dlqWriter *kafka.Writer, httpClient *http.Client, batches <-cha
 				// 2. отправляем батч с повторами
 
 				// полученный ответ это []OrderResponse, в котором orderUID-ы это ключи для мапы [orderUID]->message
-				response, err := sendBatchWithRetry(httpClient, jsonMessages, cfg)
+				response, err := sendBatchWithRetry(httpClient, jsonMessages)
 				if err != nil {
 					log.Printf("batchWorker: воркер %d: ошибка отправки батча: %v", i, err)
 					// при критической ошибке отправляем все в DLQ и идём за новой порцией сообщений
@@ -463,7 +465,7 @@ func sendToDLQ(w *kafka.Writer, msg *kafka.Message, reason string) {
 }
 
 // sendBatchWithRetry передает сообщение в API с повторами и получет []OrderResponse в ответ
-func sendBatchWithRetry(client *http.Client, data []json.RawMessage, cfg *ConsumerConfig) ([]OrderResponse, error) {
+func sendBatchWithRetry(client *http.Client, data []json.RawMessage) ([]OrderResponse, error) {
 
 	// определяем адрес отправки
 	apiURL := fmt.Sprintf("http://localhost:%d/order", cfg.ServicePort)
@@ -516,7 +518,7 @@ func sendBatchWithRetry(client *http.Client, data []json.RawMessage, cfg *Consum
 }
 
 // processBatchResponse обрабатывает полученные от api ответы по каждому сообщению из батча
-func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responses <-chan *BatchInfo, endCh chan struct{}, cfg *ConsumerConfig, wgPipe *sync.WaitGroup) {
+func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responses <-chan *BatchInfo, endCh chan struct{}, wgPipe *sync.WaitGroup) {
 
 	defer wgPipe.Done()
 
@@ -584,7 +586,7 @@ func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responses <-
 func main() {
 
 	// считываем конфигурацию
-	cfg := readConfig()
+	cfg = readConfig()
 
 	// заведём контекст для отмены работы консумера
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.LimitConsumWork)
@@ -608,7 +610,7 @@ func main() {
 	}()
 
 	// запускаем основной код консумера
-	consumer(ctx, cfg, errCh, endCh)
+	consumer(ctx, errCh, endCh)
 
 	// ждём получения ошибки или nil из логики конвейера
 	// ошибки: нет возможности читать сообщения из брокера или нет возможности заполнять DLQ
