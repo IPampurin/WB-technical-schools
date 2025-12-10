@@ -27,11 +27,11 @@ const (
 	kafkaPortConst       = 9092           // порт, на котором сидит kafka по умолчанию
 	limitConsumWorkConst = 10800          // время работы консумера по умолчанию в секундах (3 часа)
 	servicePortConst     = 8081           // порт принимающего api-сервиса по умолчанию
-	batchSizeConst       = 50             // количество сообщений в батче по умолчанию
-	batchTimeoutMsConst  = 50             // время наполнения батча по умолчанию, мс
+	batchSizeConst       = 200            // количество сообщений в батче по умолчанию
+	batchTimeoutMsConst  = 3000           // время наполнения батча по умолчанию, мс
 	maxRetriesConst      = 3              // количество повторных попыток отправки батчей в api по умолчанию
 	retryDelayBaseConst  = 100            // базовая задержка для попыток отправки по умолчанию
-	clientTimeoutConst   = 30             // таймаут для HTTP клиента по умолчанию
+	clientTimeoutConst   = 10             // таймаут для HTTP клиента по умолчанию
 	dlqTopicConst        = "my-topic-DLQ" // топик для DLQ
 	workersCountConst    = 5              // количество параллельных обработчиков в пайплайне
 )

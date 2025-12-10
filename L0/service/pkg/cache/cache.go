@@ -54,7 +54,7 @@ func getEnvInt(envVariable string, defaultValue int) int {
 
 	value, ok := os.LookupEnv(envVariable)
 	if ok {
-		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed >= 0 {
 			return parsed
 		}
 		log.Printf("ошибка парсинга %s, используем значение по умолчанию: %d", envVariable, defaultValue)

@@ -23,8 +23,8 @@ import (
 const (
 	topicNameConst     = "my-topic" // имя топика, коррелируется с консумером
 	kafkaPortConst     = 9092       // порт, на котором сидит kafka по умолчанию
-	massagesCountConst = 100        // количество сообщений, отправляемых одним врайтером, по умолчанию
-	writersCountConst  = 50         // количество врайтеров для имитации отправки "со всех сторон", по умолчанию
+	massagesCountConst = 10         // количество сообщений, отправляемых одним врайтером, по умолчанию
+	writersCountConst  = 5000       // количество врайтеров для имитации отправки "со всех сторон", по умолчанию
 )
 
 // ProducerConfig описывает настройки с учётом переменных окружения
@@ -67,7 +67,7 @@ func readConfig() *ProducerConfig {
 	return &ProducerConfig{
 		Topic:         getEnvString("TOPIC_NAME_STR", topicNameConst),
 		KafkaPort:     getEnvInt("KAFKA_PORT_NUM", kafkaPortConst),
-		MassagesCount: getEnvInt("MESAGES_COUNT", massagesCountConst),
+		MassagesCount: getEnvInt("MESSAGES_COUNT", massagesCountConst),
 		WritersCount:  getEnvInt("WRITERS_COUNT", writersCountConst),
 	}
 }
