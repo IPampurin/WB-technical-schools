@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"sync/atomic"
 	"time"
 
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
@@ -34,8 +33,8 @@ type CacheConfig struct {
 }
 
 var (
-	config atomic.Value  // атомарное хранилище для конфигурации
-	Rdb    *redis.Client // клиент Redis
+	Rdb *redis.Client
+	cfg *CacheConfig
 )
 
 // getEnvString проверяет наличие и корректность переменной окружения (строковое значение)
@@ -74,32 +73,11 @@ func readConfig() *CacheConfig {
 	}
 }
 
-// getConfig безопасно получает конфигурацию
-func getConfig() *CacheConfig {
-
-	if cfg := config.Load(); cfg != nil {
-		return cfg.(*CacheConfig)
-	}
-	// возвращаем конфигурацию по умолчанию, если ещё не инициализировано
-	return &CacheConfig{
-		RedisPort:     redisPortConst,
-		RedisPassword: redisPasswordConst,
-		RedisDBNumber: redisDBNumberConst,
-		RedisTTL:      time.Duration(redisTTLConst) * time.Second,
-	}
-}
-
-// updateConfig обновляет конфигурацию (для hot reload в будущем)
-func updateConfig(newConfig *CacheConfig) {
-
-	config.Store(newConfig)
-}
-
 // InitRedis запускает работу с Redis
 func InitRedis() error {
 
 	// считываем конфигурацию
-	cfg := readConfig()
+	cfg = readConfig()
 
 	// проверяем номер базы в рэдисе
 	if cfg.RedisDBNumber < 0 || 16 < cfg.RedisDBNumber {
@@ -114,9 +92,6 @@ func InitRedis() error {
 		log.Printf("Используется значение по умолчанию: %dс.\n", redisTTLConst)
 		cfg.RedisTTL = time.Duration(redisTTLConst) * time.Second
 	}
-
-	// атомарно сохраняем конфигурацию
-	updateConfig(cfg)
 
 	// заводим клиента Redis
 	Rdb = redis.NewClient(&redis.Options{
@@ -151,7 +126,11 @@ func InitRedis() error {
 // GetTTL определяет время жизни данных в кэше (для postOrder понадобится)
 func GetTTL() time.Duration {
 
-	return getConfig().RedisTTL
+	if cfg == nil {
+		// если конфиг еще не инициализирован, возвращаем значение по умолчанию
+		return time.Duration(redisTTLConst) * time.Second
+	}
+	return cfg.RedisTTL
 }
 
 // loadDataToCache загружает данные за последнее время в кэш при старте
