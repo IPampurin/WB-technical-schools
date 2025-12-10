@@ -24,7 +24,7 @@ const (
 	topicNameConst     = "my-topic" // имя топика, коррелируется с консумером
 	kafkaPortConst     = 9092       // порт, на котором сидит kafka по умолчанию
 	massagesCountConst = 10         // количество сообщений, отправляемых одним врайтером, по умолчанию
-	writersCountConst  = 5000       // количество врайтеров для имитации отправки "со всех сторон", по умолчанию
+	writersCountConst  = 500        // количество врайтеров для имитации отправки "со всех сторон", по умолчанию
 )
 
 // ProducerConfig описывает настройки с учётом переменных окружения
@@ -34,6 +34,8 @@ type ProducerConfig struct {
 	MassagesCount int    // количество сообщений, отправляемых одним врайтером
 	WritersCount  int    // количество врайтеров
 }
+
+var cfg *ProducerConfig
 
 // getEnvString проверяет наличие и корректность переменной окружения (строковое значение)
 func getEnvString(envVariable, defaultValue string) string {
@@ -73,7 +75,7 @@ func readConfig() *ProducerConfig {
 }
 
 // sendMessages генерирует и отправляет брокеру заданное количество сообщений
-func sendMessages(ctx context.Context, w *kafka.Writer, cfg *ProducerConfig, generatedCount, countSended, failedCount *int64, wg *sync.WaitGroup) {
+func sendMessages(ctx context.Context, w *kafka.Writer, generatedCount, countSended, failedCount *int64, wg *sync.WaitGroup) {
 
 	defer wg.Done()
 
@@ -115,7 +117,7 @@ func main() {
 	gofakeit.Seed(0)
 
 	// считываем конфигурацию
-	cfg := readConfig()
+	cfg = readConfig()
 
 	// устанавливаем соединение с брокером
 	conn, err := kafka.DialLeader(context.Background(), "tcp", fmt.Sprintf("localhost:%d", cfg.KafkaPort), cfg.Topic, 0)
@@ -172,7 +174,7 @@ func main() {
 
 	for i := 0; i < len(writers); i++ {
 		wg.Add(1)
-		go sendMessages(ctx, writers[i], cfg, &generatedCount, &countSended, &failedCount, &wg)
+		go sendMessages(ctx, writers[i], &generatedCount, &countSended, &failedCount, &wg)
 	}
 
 	wg.Wait()

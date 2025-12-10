@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -12,47 +14,357 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestDialLeader тестирует возможность подключения к брокеру и создание топика
-func TestDialLeader(t *testing.T) {
-	testCases := []struct {
-		name       string
-		brokerAddr string
-		topic      string
-		wantErr    bool
+// TestGetEnvString тестирует извлечение строковой переменной окружения
+func TestGetEnvString(t *testing.T) {
+	// Сохраняем оригинальное значение переменной
+	const testEnvVar = "TEST_ENV_VAR_GETENVSTRING"
+	originalValue, existed := os.LookupEnv(testEnvVar)
+	defer func() {
+		if existed {
+			os.Setenv(testEnvVar, originalValue)
+		} else {
+			os.Unsetenv(testEnvVar)
+		}
+	}()
+
+	tests := []struct {
+		name         string
+		setValue     string
+		defaultValue string
+		expected     string
 	}{
 		{
-			name:       "Фейковый брокер - нет соединения",
-			brokerAddr: "invalid.host.never.exists:9092",
-			topic:      "test-topic",
-			wantErr:    true,
+			name:         "переменная не установлена",
+			setValue:     "",
+			defaultValue: "default_value",
+			expected:     "default_value",
 		},
 		{
-			name:       "Рабочий брокер - успешное подключение",
-			brokerAddr: "localhost:9092",
-			topic:      "my-topic-L0",
-			wantErr:    false,
+			name:         "переменная установлена",
+			setValue:     "custom_value",
+			defaultValue: "default_value",
+			expected:     "custom_value",
+		},
+		{
+			name:         "пустая строка как значение",
+			setValue:     "",
+			defaultValue: "default_value",
+			expected:     "",
+		},
+		{
+			name:         "невалидное значение",
+			setValue:     "1",
+			defaultValue: "int",
+			expected:     "1",
 		},
 	}
 
-	for _, tt := range testCases {
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			conn, err := kafka.DialLeader(context.Background(), "tcp", tt.brokerAddr, tt.topic, 0)
-
-			if tt.wantErr {
-				require.Error(t, err, "Ожидалась ошибка подключения.")
-				assert.Nil(t, conn, "Соединение должно быть nil при ошибке.")
-				return
+			// Устанавливаем или сбрасываем переменную окружения
+			if tt.setValue == "" && tt.name != "пустая строка как значение" {
+				os.Unsetenv(testEnvVar)
+			} else {
+				os.Setenv(testEnvVar, tt.setValue)
 			}
 
-			require.NoError(t, err, "Неожиданная ошибка подключения.")
-			require.NotNil(t, conn, "Соединение не должно быть nil.")
-			defer conn.Close()
+			// Вызываем тестируемую функцию
+			result := getEnvString(testEnvVar, tt.defaultValue)
 
-			partitions, err := conn.ReadPartitions(tt.topic)
-			assert.NoError(t, err, "Ошибка при получении информации о партициях.")
-			assert.NotEmpty(t, partitions, "Топик должен содержать минимум одну партицию.")
+			// Проверяем результат
+			assert.Equal(t, tt.expected, result,
+				"Для теста '%s': ожидалось '%s', получено '%s'",
+				tt.name, tt.expected, result)
 		})
 	}
+}
+
+// TestGetEnvInt тестирует извлечение числовой переменной окружения
+func TestGetEnvInt(t *testing.T) {
+	// Сохраняем оригинальное значение переменной
+	const testEnvVar = "TEST_ENV_VAR_GETENVINT"
+	originalValue, existed := os.LookupEnv(testEnvVar)
+	defer func() {
+		if existed {
+			os.Setenv(testEnvVar, originalValue)
+		} else {
+			os.Unsetenv(testEnvVar)
+		}
+	}()
+
+	tests := []struct {
+		name         string
+		setValue     string
+		defaultValue int
+		expected     int
+	}{
+		{
+			name:         "переменная не установлена",
+			setValue:     "",
+			defaultValue: 100,
+			expected:     100,
+		},
+		{
+			name:         "переменная установлена корректно",
+			setValue:     "200",
+			defaultValue: 100,
+			expected:     200,
+		},
+		{
+			name:         "пустая строка как значение",
+			setValue:     "",
+			defaultValue: 100,
+			expected:     100,
+		},
+		{
+			name:         "отрицательное число",
+			setValue:     "-50",
+			defaultValue: 100,
+			expected:     -50,
+		},
+		{
+			name:         "ноль",
+			setValue:     "0",
+			defaultValue: 100,
+			expected:     0,
+		},
+		{
+			name:         "невалидное значение (строка)",
+			setValue:     "abc",
+			defaultValue: 100,
+			expected:     100,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Устанавливаем или сбрасываем переменную окружения
+			if tt.setValue == "" && tt.name != "пустая строка как значение" {
+				os.Unsetenv(testEnvVar)
+			} else {
+				os.Setenv(testEnvVar, tt.setValue)
+			}
+
+			// Вызываем тестируемую функцию
+			result := getEnvInt(testEnvVar, tt.defaultValue)
+
+			// Проверяем результат
+			assert.Equal(t, tt.expected, result,
+				"Для теста '%s': ожидалось '%d', получено '%d'",
+				tt.name, tt.expected, result)
+		})
+	}
+}
+
+// TestReadConfigProducer тестирует получение конфигурации продюсера
+func TestReadConfigProducer(t *testing.T) {
+	// Сохраняем оригинальные значения всех переменных окружения
+	envVars := map[string]string{
+		"TOPIC_NAME_STR": "",
+		"KAFKA_PORT_NUM": "",
+		"MESSAGES_COUNT": "",
+		"WRITERS_COUNT":  "",
+	}
+
+	// Сохраняем и очищаем переменные
+	for envVar := range envVars {
+		if val, exists := os.LookupEnv(envVar); exists {
+			envVars[envVar] = val
+			defer os.Setenv(envVar, val)
+		} else {
+			defer os.Unsetenv(envVar)
+		}
+		os.Unsetenv(envVar)
+	}
+
+	tests := []struct {
+		name     string
+		setEnv   map[string]string
+		expected *ProducerConfig
+	}{
+		{
+			name:   "значения по умолчанию",
+			setEnv: map[string]string{}, // все переменные не установлены
+			expected: &ProducerConfig{
+				Topic:         topicNameConst,
+				KafkaPort:     kafkaPortConst,
+				MassagesCount: massagesCountConst,
+				WritersCount:  writersCountConst,
+			},
+		},
+		{
+			name: "частично переопределенные значения",
+			setEnv: map[string]string{
+				"TOPIC_NAME_STR": "custom-topic",
+				"MESSAGES_COUNT": "100",
+				"WRITERS_COUNT":  "10",
+			},
+			expected: &ProducerConfig{
+				Topic:         "custom-topic",
+				KafkaPort:     kafkaPortConst, // остается по умолчанию
+				MassagesCount: 100,
+				WritersCount:  10,
+			},
+		},
+		{
+			name: "все значения переопределены",
+			setEnv: map[string]string{
+				"TOPIC_NAME_STR": "test-topic",
+				"KAFKA_PORT_NUM": "9093",
+				"MESSAGES_COUNT": "50",
+				"WRITERS_COUNT":  "5",
+			},
+			expected: &ProducerConfig{
+				Topic:         "test-topic",
+				KafkaPort:     9093,
+				MassagesCount: 50,
+				WritersCount:  5,
+			},
+		},
+		{
+			name: "некорректные числовые значения",
+			setEnv: map[string]string{
+				"KAFKA_PORT_NUM": "not-a-number",
+				"MESSAGES_COUNT": "invalid",
+				"WRITERS_COUNT":  "abc",
+			},
+			expected: &ProducerConfig{
+				Topic:         topicNameConst,
+				KafkaPort:     kafkaPortConst, // значение по умолчанию при ошибке парсинга
+				MassagesCount: massagesCountConst,
+				WritersCount:  writersCountConst,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Устанавливаем переменные окружения для теста
+			for envVar, value := range tt.setEnv {
+				os.Setenv(envVar, value)
+			}
+
+			// Вызываем тестируемую функцию
+			config := readConfig()
+
+			// Проверяем результат
+			assert.Equal(t, tt.expected.Topic, config.Topic, "Topic не совпадает")
+			assert.Equal(t, tt.expected.KafkaPort, config.KafkaPort, "KafkaPort не совпадает")
+			assert.Equal(t, tt.expected.MassagesCount, config.MassagesCount, "MassagesCount не совпадает")
+			assert.Equal(t, tt.expected.WritersCount, config.WritersCount, "WritersCount не совпадает")
+
+			// Очищаем переменные для следующего теста
+			for envVar := range tt.setEnv {
+				os.Unsetenv(envVar)
+			}
+		})
+	}
+}
+
+// TestCreateDelivery проверяет генерацию структуры Delivery
+func TestCreateDelivery(t *testing.T) {
+	delivery := createDelivery()
+
+	// Проверяем обязательные поля
+	assert.NotEmpty(t, delivery.Name, "Name: обязательное поле")
+	assert.NotEmpty(t, delivery.Phone, "Phone: обязательное поле")
+	assert.NotEmpty(t, delivery.Zip, "Zip: обязательное поле")
+	assert.NotEmpty(t, delivery.City, "City: обязательное поле")
+	assert.NotEmpty(t, delivery.Address, "Address: обязательное поле")
+	assert.NotEmpty(t, delivery.Region, "Region: обязательное поле")
+	assert.NotEmpty(t, delivery.Email, "Email: обязательное поле")
+
+	// Проверяем формат email
+	assert.Contains(t, delivery.Email, "@", "Email должен содержать @")
+	assert.Contains(t, delivery.Email, ".", "Email должен содержать точку")
+
+	// Проверяем формат телефона (хотя бы содержит цифры)
+	hasDigit := false
+	for _, r := range delivery.Phone {
+		if r >= '0' && r <= '9' {
+			hasDigit = true
+			break
+		}
+	}
+	assert.True(t, hasDigit, "Phone должен содержать цифры")
+
+	// Проверяем что адрес содержит и улицу и номер
+	assert.Contains(t, delivery.Address, ",", "Address должен содержать запятую (улица, номер)")
+
+	// Проверяем длину полей
+	assert.GreaterOrEqual(t, len(delivery.Name), 2, "Name должен быть не короче 2 символов")
+	assert.GreaterOrEqual(t, len(delivery.City), 2, "City должен быть не короче 2 символов")
+}
+
+// TestCreatePayment проверяет генерацию структуры Payment
+func TestCreatePayment(t *testing.T) {
+	payment := createPayment()
+
+	// Проверяем обязательные поля
+	assert.NotEmpty(t, payment.Transaction, "Transaction: обязательное поле")
+	assert.NotEmpty(t, payment.Currency, "Currency: обязательное поле")
+	assert.NotEmpty(t, payment.Provider, "Provider: обязательное поле")
+	assert.NotEmpty(t, payment.Bank, "Bank: обязательное поле")
+
+	// Проверяем UUID формат (хотя бы содержит дефисы)
+	assert.Contains(t, payment.Transaction, "-", "Transaction должен быть в формате UUID")
+	if payment.RequestID != "" {
+		assert.Contains(t, payment.RequestID, "-", "RequestID должен быть в формате UUID")
+	}
+
+	// Проверяем числовые поля
+	assert.Greater(t, payment.Amount, 0.0, "Amount должен быть больше 0")
+	assert.GreaterOrEqual(t, payment.DeliveryCost, 0.0, "DeliveryCost должен быть неотрицательным")
+	assert.Greater(t, payment.GoodsTotal, 0.0, "GoodsTotal должен быть больше 0")
+	assert.GreaterOrEqual(t, payment.CustomFee, 0.0, "CustomFee должен быть неотрицательным")
+
+	// Проверяем дату (не в будущем и не слишком давно)
+	assert.NotZero(t, payment.PaymentDT, "PaymentDT не должен быть нулевым")
+	assert.LessOrEqual(t, payment.PaymentDT, time.Now().Unix(), "PaymentDT не должен быть в будущем")
+	assert.Greater(t, payment.PaymentDT, time.Now().Add(-365*24*time.Hour).Unix(), "PaymentDT не должен быть старше года")
+
+	// Проверяем логику: сумма = товары + доставка (с учетом округления)
+	expectedAmount := payment.GoodsTotal + payment.DeliveryCost
+	assert.InDelta(t, expectedAmount, payment.Amount, 0.01, "Amount должен равняться GoodsTotal + DeliveryCost")
+}
+
+// TestCreateItem проверяет генерацию структуры Item
+func TestCreateItem(t *testing.T) {
+	item := createItem()
+
+	// Проверяем обязательные поля
+	assert.Greater(t, item.ChrtID, 0, "ChrtID должен быть больше 0")
+	assert.NotEmpty(t, item.RID, "RID: обязательное поле")
+	assert.NotEmpty(t, item.Name, "Name: обязательное поле")
+	assert.NotEmpty(t, item.Size, "Size: обязательное поле")
+	assert.NotEmpty(t, item.Brand, "Brand: обязательное поле")
+
+	// Проверяем TrackNumber
+	assert.Equal(t, "WBILMTESTTRACK", item.TrackNumber, "TrackNumber должен быть 'WBILMTESTTRACK'")
+
+	// Проверяем числовые поля
+	assert.Greater(t, item.Price, 0.0, "Price должен быть больше 0")
+	assert.GreaterOrEqual(t, item.Sale, 0.0, "Sale должен быть неотрицательным")
+	assert.LessOrEqual(t, item.Sale, 100.0, "Sale не должен превышать 100%")
+	assert.Greater(t, item.TotalPrice, 0.0, "TotalPrice должен быть больше 0")
+	assert.Greater(t, item.NMID, 0, "NMID должен быть больше 0")
+	assert.GreaterOrEqual(t, item.Status, 0, "Status должен быть неотрицательным")
+
+	// Проверяем логику: TotalPrice = Price * (1 - Sale/100) (с учетом округления)
+	expectedTotalPrice := item.Price * (1 - item.Sale/100)
+	assert.InDelta(t, expectedTotalPrice, item.TotalPrice, 0.01,
+		"TotalPrice должен равняться Price * (1 - Sale/100)")
+
+	// Проверяем UUID формат для RID
+	assert.Contains(t, item.RID, "-", "RID должен быть в формате UUID")
+
+	// Проверяем размер (допустимые значения)
+	validSizes := map[string]bool{"S": true, "M": true, "L": true, "XL": true}
+	assert.True(t, validSizes[item.Size], "Size должен быть одним из: S, M, L, XL")
+
+	// Проверяем статус (допустимые значения HTTP)
+	assert.GreaterOrEqual(t, item.Status, 200, "Status должен быть >= 200 (HTTP код)")
+	assert.LessOrEqual(t, item.Status, 599, "Status должен быть <= 599 (HTTP код)")
 }
 
 // TestMessageGenerate проверяет работу функции генерации сообщений
@@ -143,17 +455,78 @@ func TestMessageGenerateCount(t *testing.T) {
 		t.Run(fmt.Sprintf("Count_%d", tt.count), func(t *testing.T) {
 			msgs := messageGenerate(tt.count)
 			assert.Len(t, msgs, tt.count, "Количество сообщений должно соответствовать запрошенному")
+
+			// Для ненулевого количества проверяем что сообщения не пустые
+			if tt.count > 0 {
+				for i, msg := range msgs {
+					assert.NotEmpty(t, msg, "Сообщение %d не должно быть пустым", i)
+				}
+			}
+		})
+	}
+}
+
+// TestDialLeader тестирует возможность подключения к брокеру и создание топика
+func TestDialLeader(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Пропускаем интеграционный тест с Kafka в short режиме")
+	}
+
+	testCases := []struct {
+		name       string
+		brokerAddr string
+		topic      string
+		wantErr    bool
+	}{
+		{
+			name:       "Фейковый брокер - нет соединения",
+			brokerAddr: "invalid.host.never.exists:9092",
+			topic:      "test-topic",
+			wantErr:    true,
+		},
+		{
+			name:       "Рабочий брокер - успешное подключение",
+			brokerAddr: "localhost:9092",
+			topic:      "my-topic-L0",
+			wantErr:    false,
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			conn, err := kafka.DialLeader(ctx, "tcp", tt.brokerAddr, tt.topic, 0)
+
+			if tt.wantErr {
+				require.Error(t, err, "Ожидалась ошибка подключения.")
+				assert.Nil(t, conn, "Соединение должно быть nil при ошибке.")
+				return
+			}
+
+			require.NoError(t, err, "Неожиданная ошибка подключения.")
+			require.NotNil(t, conn, "Соединение не должно быть nil.")
+			defer conn.Close()
+
+			partitions, err := conn.ReadPartitions(tt.topic)
+			assert.NoError(t, err, "Ошибка при получении информации о партициях.")
+			assert.NotEmpty(t, partitions, "Топик должен содержать минимум одну партицию.")
 		})
 	}
 }
 
 // TestWriteMessage тестирует отправку и получение сообщений
 func TestWriteMessage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Пропускаем интеграционный тест с Kafka в short режиме")
+	}
+
 	// задаём начальные условия
-	testTopic := "test-topic-L0"
+	testTopic := "test-topic-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	brokerAddr := "localhost:9092"
 
-	// подключаемся к брокеру
+	// подключаемся к брокеру и создаем топик
 	conn, err := kafka.DialLeader(context.Background(), "tcp", brokerAddr, testTopic, 0)
 	require.NoError(t, err, "Не удалось подключиться к брокеру.")
 	defer conn.Close()
@@ -214,4 +587,13 @@ func TestWriteMessage(t *testing.T) {
 	}
 
 	assert.Equal(t, expectedCount, counter, "Количество прочитанных сообщений не совпадает.")
+
+	// очистка тестового топика
+	t.Cleanup(func() {
+		conn, err := kafka.Dial("tcp", brokerAddr)
+		if err == nil {
+			conn.DeleteTopics(testTopic)
+			conn.Close()
+		}
+	})
 }
