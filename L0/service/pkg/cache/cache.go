@@ -21,7 +21,7 @@ const (
 	redisPasswordConst = ""     // пароль от БД рэдиса по умолчанию
 	redisDBNumberConst = 0      // номер БД рэдиса по умолчанию
 	redisTTLConst      = 600    // время жизни данных в кэше в секундах по умолчанию
-	thresholdConst     = 24     // время в часах за которое берём записи для прогрева кэша
+	thresholdConst     = 24     // время в часах за которое берём записи для прогрева кэша по умолчанию
 )
 
 // CacheConfig описывает настройки с учётом переменных окружения
@@ -30,6 +30,7 @@ type CacheConfig struct {
 	RedisPassword string        // пароль от БД рэдиса
 	RedisDBNumber int           // номер БД рэдиса
 	RedisTTL      time.Duration // время жизни данных в кэше в секундах
+	RedisWarming  time.Duration // время в часах за которое берём записи для прогрева кэша
 }
 
 var (
@@ -70,6 +71,7 @@ func readConfig() *CacheConfig {
 		RedisPassword: getEnvString("REDIS_PASSWORD", redisPasswordConst),
 		RedisDBNumber: getEnvInt("REDIS_DB", redisDBNumberConst),
 		RedisTTL:      time.Duration(getEnvInt("REDIS_TTL", redisTTLConst)) * time.Second,
+		RedisWarming:  time.Duration(getEnvInt("REDIS_WARMING", thresholdConst)) * time.Hour,
 	}
 }
 
@@ -137,7 +139,7 @@ func GetTTL() time.Duration {
 func loadDataToCache() error {
 
 	// устанавливаем временной порог (например, 24 часа)
-	timeThreshold := time.Now().Add(-time.Duration(thresholdConst) * time.Hour)
+	timeThreshold := time.Now().Add(-cfg.RedisWarming)
 
 	// получаем заказы до установленного порога
 	var orders []models.Order
@@ -151,7 +153,8 @@ func loadDataToCache() error {
 		return fmt.Errorf("ошибка при получении заказов: %v", err)
 	}
 
-	log.Printf("Найдено %d заказов за последние %d часа", len(orders), thresholdConst)
+	hours := cfg.RedisWarming.Hours()
+	log.Printf("Найдено %d заказов за последние %.0f часа", len(orders), hours)
 
 	// сохраняем данные в redis
 	keyValues := make(map[string]interface{})
