@@ -10,41 +10,65 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// выносим константы конфигурации по умолчанию, чтобы были на виду
+const (
+	portDBConst     = "5432"          // порт, на котором сидит база данных по умолчанию
+	nameDBConst     = "level-zero-db" // имя базы данных по умолчанию
+	passwordDBConst = "postgres"      // пароль базы данных по умолчанию
+	userDBConst     = "postgres"      // имя пользователя базы данных по умолчанию
+)
+
+// DBConfig описывает настройки с учётом переменных окружения
+type DBConfig struct {
+	PortDB     string // порт, на котором сидит база данных
+	NameDB     string // имя базы данных
+	PasswordDB string // пароль базы данных
+	UserDB     string // имя пользователя базы данных
+}
+
+var cfgDB *DBConfig
+
 type Dbinstance struct {
 	Db *gorm.DB
 }
 
 var DB Dbinstance
 
+// getEnvString проверяет наличие и корректность переменной окружения (строковое значение)
+func getEnvString(envVariable, defaultValue string) string {
+
+	value, ok := os.LookupEnv(envVariable)
+	if ok {
+		return value
+	}
+
+	return defaultValue
+}
+
+// readConfig уточняет конфигурацию с учётом переменных окружения
+func readConfig() *DBConfig {
+
+	return &DBConfig{
+		PortDB:     getEnvString("DB_PORT", portDBConst),
+		NameDB:     getEnvString("DB_NAME", nameDBConst),
+		PasswordDB: getEnvString("DB_PASSWORD", passwordDBConst),
+		UserDB:     getEnvString("DB_USER", userDBConst),
+	}
+}
+
 // ConnectDB устанавливает соединение с базой данных
 func ConnectDB() error {
 
-	// Имя пользователя базы данных, пароль и имя базы данных, а также порт базы берутся из
-	// переменных окружения, рекомендуется описать их в файле .env
-	portDB, ok := os.LookupEnv("DBL0_PORT")
-	if !ok {
-		portDB = "5432"
-	}
-	nameDB, ok := os.LookupEnv("DBL0_NAME")
-	if !ok {
-		nameDB = "level-zero-db"
-	}
-	passwordDB, ok := os.LookupEnv("DBL0_PASSWORD")
-	if !ok {
-		passwordDB = "postgres"
-	}
-	userDB, ok := os.LookupEnv("DBL0_USER")
-	if !ok {
-		userDB = "postgres"
-	}
+	// считываем конфигурацию
+	cfgDB = readConfig()
 
 	// dsn - URL для соединения с базой данных. db имя сервиса БД из docker-compose
 	dsn := fmt.Sprintf(
 		"host=db user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Europe/Moscow",
-		userDB,
-		passwordDB,
-		nameDB,
-		portDB,
+		cfgDB.UserDB,
+		cfgDB.PasswordDB,
+		cfgDB.NameDB,
+		cfgDB.PortDB,
 	)
 
 	// создаём подключение к базе данных.

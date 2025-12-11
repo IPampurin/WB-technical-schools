@@ -14,14 +14,39 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+const servicePortConst = "8081"
+
+// SrvConfig описывает настройки с учётом переменных окружения
+type SrvConfig struct {
+	ServicePort string // порт, на котором работает сервер
+}
+
+var cfgSrv *SrvConfig
+
+// getEnvString проверяет наличие и корректность переменной окружения (строковое значение)
+func getEnvString(envVariable, defaultValue string) string {
+
+	value, ok := os.LookupEnv(envVariable)
+	if ok {
+		return value
+	}
+
+	return defaultValue
+}
+
+// readConfig уточняет конфигурацию с учётом переменных окружения
+func readConfig() *SrvConfig {
+
+	return &SrvConfig{
+		ServicePort: getEnvString("SERVICE_PORT", servicePortConst),
+	}
+}
+
 // Run запускает сервер и блокируется до graceful shutdown
 func Run(ctx context.Context) error {
 
-	// по умолчанию порт хоста 8081 (доступ в браузере на localhost:8081)
-	port, ok := os.LookupEnv("L0_PORT")
-	if !ok {
-		port = "8081"
-	}
+	// считываем конфигурацию
+	cfgSrv = readConfig()
 
 	r := chi.NewRouter() // роутер
 
@@ -37,7 +62,7 @@ func Run(ctx context.Context) error {
 
 	// создаем экземпляр сервера
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%v", port),
+		Addr:    fmt.Sprintf(":%v", cfgSrv.ServicePort),
 		Handler: r,
 	}
 
@@ -63,7 +88,7 @@ func Run(ctx context.Context) error {
 	}()
 
 	// запускаем сервер (блокирующий вызов)
-	log.Printf("Запуск сервера на порту %s", port)
+	log.Printf("Запуск сервера на порту %s", cfgSrv.ServicePort)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("ошибка сервера: %w", err)
 	}
