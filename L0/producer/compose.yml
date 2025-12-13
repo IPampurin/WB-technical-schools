@@ -1,12 +1,15 @@
 version: '3'
 
 services:
-  go-producer:  
-    build:
-      context: .
-      dockerfile: Dockerfile
+  producer:  
+    build: .
     env_file:
       - .env
-    image: my-producer  
     command: ["./producer"]
-    network_mode: "host"
+    networks:
+      - kafka_frontend
+
+networks:
+  kafka_frontend:
+    external: true  # Используем внешнюю сеть
+    name: kafka_frontend

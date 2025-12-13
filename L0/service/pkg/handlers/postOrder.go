@@ -256,6 +256,7 @@ func saveOrdersBatch(orders []*models.Order) map[string]OrderResponse {
 	// создаем сессию с нужными настройками
 	session := tx.Session(&gorm.Session{
 		FullSaveAssociations: true,
+		CreateBatchSize:      1000, // вставка в БД батчами по 1000
 	})
 
 	// сохраняем все заказы разом

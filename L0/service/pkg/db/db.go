@@ -12,6 +12,7 @@ import (
 
 // выносим константы конфигурации по умолчанию, чтобы были на виду
 const (
+	hostDBConst     = "postgres"      // имя службы (контейнера) в сети докера по умолчанию
 	portDBConst     = "5432"          // порт, на котором сидит база данных по умолчанию
 	nameDBConst     = "level-zero-db" // имя базы данных по умолчанию
 	passwordDBConst = "postgres"      // пароль базы данных по умолчанию
@@ -20,6 +21,7 @@ const (
 
 // DBConfig описывает настройки с учётом переменных окружения
 type DBConfig struct {
+	HostDB     string // имя службы (контейнера) в сети докера
 	PortDB     string // порт, на котором сидит база данных
 	NameDB     string // имя базы данных
 	PasswordDB string // пароль базы данных
@@ -49,6 +51,7 @@ func getEnvString(envVariable, defaultValue string) string {
 func readConfig() *DBConfig {
 
 	return &DBConfig{
+		HostDB:     getEnvString("DB_HOST_NAME", hostDBConst),
 		PortDB:     getEnvString("DB_PORT", portDBConst),
 		NameDB:     getEnvString("DB_NAME", nameDBConst),
 		PasswordDB: getEnvString("DB_PASSWORD", passwordDBConst),
@@ -63,19 +66,14 @@ func ConnectDB() error {
 	cfgDB = readConfig()
 
 	// dsn - URL для соединения с базой данных. db имя сервиса БД из docker-compose
-	dsn := fmt.Sprintf(
-		"host=db user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Europe/Moscow",
-		cfgDB.UserDB,
-		cfgDB.PasswordDB,
-		cfgDB.NameDB,
-		cfgDB.PortDB,
-	)
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Europe/Moscow",
+		cfgDB.HostDB, cfgDB.UserDB, cfgDB.PasswordDB, cfgDB.NameDB, cfgDB.PortDB)
 
 	// создаём подключение к базе данных.
 	// В &gorm.Config настраивается логер, который будет сохранять информацию
-	// обо всех активностях с базой данных.
+	// обо всех основных активностях с базой данных.
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
 		log.Printf("Не удалось подключиться к базе данных: %v", err)
@@ -83,7 +81,7 @@ func ConnectDB() error {
 	}
 
 	log.Println("Подключение к базе данных установлено.")
-	db.Logger = logger.Default.LogMode(logger.Info)
+	// db.Logger = logger.Default.LogMode(logger.Info)
 
 	log.Println("Запуск миграций.")
 

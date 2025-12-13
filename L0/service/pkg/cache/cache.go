@@ -17,15 +17,17 @@ import (
 
 // выносим константы конфигурации по умолчанию, чтобы были на виду
 const (
-	redisPortConst     = "6379" // порт, на котором сидит рэдис по умолчанию
-	redisPasswordConst = ""     // пароль от БД рэдиса по умолчанию
-	redisDBNumberConst = 0      // номер БД рэдиса по умолчанию
-	redisTTLConst      = 600    // время жизни данных в кэше в секундах по умолчанию
-	thresholdConst     = 24     // время в часах за которое берём записи для прогрева кэша по умолчанию
+	redisHostConst     = "redis" // имя службы (контейнера) в сети докера по умолчанию
+	redisPortConst     = "6379"  // порт, на котором сидит рэдис по умолчанию
+	redisPasswordConst = ""      // пароль от БД рэдиса по умолчанию
+	redisDBNumberConst = 0       // номер БД рэдиса по умолчанию
+	redisTTLConst      = 600     // время жизни данных в кэше в секундах по умолчанию
+	thresholdConst     = 24      // время в часах за которое берём записи для прогрева кэша по умолчанию
 )
 
 // CacheConfig описывает настройки с учётом переменных окружения
 type CacheConfig struct {
+	RedisHost     string        // имя службы (контейнера) в сети докера
 	RedisPort     string        // порт, на котором сидит рэдис
 	RedisPassword string        // пароль от БД рэдиса
 	RedisDBNumber int           // номер БД рэдиса
@@ -67,6 +69,7 @@ func getEnvInt(envVariable string, defaultValue int) int {
 func readConfig() *CacheConfig {
 
 	return &CacheConfig{
+		RedisHost:     getEnvString("REDIS_HOST_NAME", redisHostConst),
 		RedisPort:     getEnvString("REDIS_PORT", redisPortConst),
 		RedisPassword: getEnvString("REDIS_PASSWORD", redisPasswordConst),
 		RedisDBNumber: getEnvInt("REDIS_DB", redisDBNumberConst),
@@ -97,7 +100,7 @@ func InitRedis() error {
 
 	// заводим клиента Redis
 	Rdb = redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%s", "redis", cfgCache.RedisPort),
+		Addr:     fmt.Sprintf("%s:%s", cfgCache.RedisHost, cfgCache.RedisPort),
 		Password: cfgCache.RedisPassword,
 		DB:       cfgCache.RedisDBNumber,
 	})

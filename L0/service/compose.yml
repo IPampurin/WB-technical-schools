@@ -3,35 +3,53 @@ services:
     build: .
     env_file:
       - .env
+    container_name: ${SERVICE_HOST_NAME:-service}
+    hostname: service
     ports:
-      - ${L0_PORT}:8081
+      - ${SERVICE_PORT}:8081
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy 
     stop_grace_period: 45s
+    networks:
+      - backend
+      - kafka_frontend
 
-
-  db:
-    image: postgres
+  postgres:
+    image: postgres:16
+    container_name: ${DB_HOST_NAME:-postgres}
+    hostname: postgres
     ports:
-      - ${DBL0_PORT}:5432
+      - ${DB_PORT}:5432
     environment:
-      - POSTGRES_USER=${DBL0_USER}
-      - POSTGRES_PASSWORD=${DBL0_PASSWORD}
-      - POSTGRES_DB=${DBL0_NAME}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=256MB"          # увеличим кэш postgres
+      - "-c"
+      - "maintenance_work_mem=64MB"    # увеличим для служебных операций (быстрее создание индексов)
+      - "-c"
+      - "wal_buffers=16MB"              # увеличим буфер журнала транзакций
     volumes:
       - postgres-db:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DBL0_USER} -d ${DBL0_NAME}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 5s
       timeout: 5s
       retries: 10
-      start_period: 10s
+      start_period: 10s    
+    networks:
+      - backend
 
   redis:
-    image: redis
+    image: redis:7
+    container_name: ${REDIS_HOST_NAME:-redis}
+    hostname: redis
     ports:
       - ${REDIS_PORT}:6379
     environment:
@@ -45,8 +63,16 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-      start_period: 5s
-      
+      start_period: 5s    
+    networks:
+      - backend
+
 volumes:
   postgres-db:
   redis_data:
+
+networks:
+  kafka_frontend:
+    external: true  # Используем внешнюю сеть
+    name: kafka_frontend
+  backend:

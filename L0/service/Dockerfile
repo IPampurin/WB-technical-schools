@@ -6,7 +6,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o service-L0 .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o service .
 
 FROM alpine:latest
 
@@ -15,7 +15,7 @@ WORKDIR /app
 RUN apk --no-cache add ca-certificates tzdata
 
 COPY .env ./
-COPY --from=builder /app/service-L0 .
+COPY --from=builder /app/service .
 COPY web/ ./web/
 
-CMD ["./service-L0"]
+CMD ["./service"]

@@ -22,14 +22,16 @@ import (
 
 const (
 	topicNameConst     = "my-topic" // имя топика, коррелируется с консумером
+	kafkaHostConst     = "kafka"    // имя службы (контейнера) в сети докера по умолчанию
 	kafkaPortConst     = 9092       // порт, на котором сидит kafka по умолчанию
 	massagesCountConst = 10         // количество сообщений, отправляемых одним врайтером, по умолчанию
-	writersCountConst  = 500        // количество врайтеров для имитации отправки "со всех сторон", по умолчанию
+	writersCountConst  = 5000       // количество врайтеров для имитации отправки "со всех сторон", по умолчанию
 )
 
 // ProducerConfig описывает настройки с учётом переменных окружения
 type ProducerConfig struct {
 	Topic         string // имя топика (коррелируется с консумером)
+	KafkaHost     string // имя службы (контейнера) в сети докера
 	KafkaPort     int    // порт, на котором сидит kafka
 	MassagesCount int    // количество сообщений, отправляемых одним врайтером
 	WritersCount  int    // количество врайтеров
@@ -68,6 +70,7 @@ func readConfig() *ProducerConfig {
 
 	return &ProducerConfig{
 		Topic:         getEnvString("TOPIC_NAME_STR", topicNameConst),
+		KafkaHost:     getEnvString("KAFKA_HOST_NAME", kafkaHostConst),
 		KafkaPort:     getEnvInt("KAFKA_PORT_NUM", kafkaPortConst),
 		MassagesCount: getEnvInt("MESSAGES_COUNT", massagesCountConst),
 		WritersCount:  getEnvInt("WRITERS_COUNT", writersCountConst),
@@ -113,6 +116,8 @@ func sendMessages(ctx context.Context, w *kafka.Writer, generatedCount, countSen
 
 func main() {
 
+	start := time.Now()
+
 	// инициализируем генератор gofakeit
 	gofakeit.Seed(0)
 
@@ -120,7 +125,7 @@ func main() {
 	cfg = readConfig()
 
 	// устанавливаем соединение с брокером
-	conn, err := kafka.DialLeader(context.Background(), "tcp", fmt.Sprintf("localhost:%d", cfg.KafkaPort), cfg.Topic, 0)
+	conn, err := kafka.DialLeader(context.Background(), "tcp", fmt.Sprintf("%s:%d", cfg.KafkaHost, cfg.KafkaPort), cfg.Topic, 0)
 	if err != nil {
 		log.Fatalf("ошибка создания топика кафки: %v\n", err)
 	}
@@ -137,10 +142,10 @@ func main() {
 	for i := 0; i < len(writers); i++ {
 		// определяем продюсер
 		writers[i] = &kafka.Writer{
-			Addr:         kafka.TCP(fmt.Sprintf("localhost:%d", cfg.KafkaPort)), // список брокеров
-			Topic:        cfg.Topic,                                             // имя топика, в который будем слать сообщения
-			Async:        false,                                                 // можно установить true и получить максимальную скорость без гарантии доставки
-			RequiredAcks: kafka.RequireAll,                                      // максимальный контроль доставки (подтверждение от всех реплик)
+			Addr:         kafka.TCP(fmt.Sprintf("%s:%d", cfg.KafkaHost, cfg.KafkaPort)), // список брокеров
+			Topic:        cfg.Topic,                                                     // имя топика, в который будем слать сообщения
+			Async:        false,                                                         // можно установить true и получить максимальную скорость без гарантии доставки
+			RequiredAcks: kafka.RequireAll,                                              // максимальный контроль доставки (подтверждение от всех реплик)
 		}
 		defer func() {
 			if err := writers[i].Close(); err != nil {
@@ -181,7 +186,7 @@ func main() {
 
 	log.Println("Врайтеры завершили отправку сообщений брокеру.")
 
-	log.Printf("Сгенерировано сообщений: %d. Отправлено брокеру сообщений: %d. Ошибок при отправке: %d.\n", generatedCount, countSended, failedCount)
+	log.Printf("Сгенерировано сообщений: %d. Отправлено брокеру сообщений: %d. Ошибок при отправке: %d. Время работы: %v c.\n", generatedCount, countSended, failedCount, time.Since(start).Seconds())
 }
 
 // Заказ

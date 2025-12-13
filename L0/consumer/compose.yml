@@ -1,13 +1,16 @@
 version: '3'
 
 services:
-  go-consumer:  
-    build:
-      context: .
-      dockerfile: Dockerfile
+  consumer:  
+    build: .
     env_file:
       - .env
-    image: my-consumer  
     command: ["./consumer"]
-    network_mode: "host"
     stop_grace_period: 45s
+    networks:
+      - kafka_frontend
+
+networks:
+  kafka_frontend:
+    external: true  # Используем внешнюю сеть
+    name: kafka_frontend
