@@ -22,20 +22,19 @@ import (
 // выносим константы конфигурации по умолчанию, чтобы были на виду.
 // для работы программы менять в .env
 const (
-	topicNameConst       = "my-topic"     // имя топика, коррелируется с продюсером
-	groupIDNameConst     = "my-groupID"   // произвольное в нашем случае имя группы
-	kafkaHostConst       = "kafka"        // имя службы (контейнера) в сети докера по умолчанию
-	kafkaPortConst       = 9092           // порт, на котором сидит kafka по умолчанию
-	limitConsumWorkConst = 3600           // время работы консумера по умолчанию в секундах (1 час)
-	serviceHostConst     = "service"      // имя службы (контейнера) в сети докера по умолчанию
-	servicePortConst     = 8081           // порт принимающего api-сервиса по умолчанию
-	batchSizeConst       = 1000           // количество сообщений в батче по умолчанию
-	batchTimeoutMsConst  = 2000           // время наполнения батча по умолчанию, мс
-	maxRetriesConst      = 3              // количество повторных попыток отправки батчей в api по умолчанию
-	retryDelayBaseConst  = 100            // базовая задержка для попыток отправки по умолчанию
-	clientTimeoutConst   = 10             // таймаут для HTTP клиента по умолчанию
-	dlqTopicConst        = "my-topic-DLQ" // топик для DLQ
-	workersCountConst    = 5              // количество параллельных обработчиков в пайплайне
+	topicNameConst      = "my-topic"     // имя топика, коррелируется с продюсером
+	groupIDNameConst    = "my-groupID"   // произвольное в нашем случае имя группы
+	kafkaHostConst      = "kafka"        // имя службы (контейнера) в сети докера по умолчанию
+	kafkaPortConst      = 9092           // порт, на котором сидит kafka по умолчанию
+	serviceHostConst    = "service"      // имя службы (контейнера) в сети докера по умолчанию
+	servicePortConst    = 8081           // порт принимающего api-сервиса по умолчанию
+	batchSizeConst      = 1000           // количество сообщений в батче по умолчанию
+	batchTimeoutConst   = 5              // время наполнения батча по умолчанию, с
+	maxRetriesConst     = 3              // количество повторных попыток отправки батчей в api по умолчанию
+	retryDelayBaseConst = 100            // базовая задержка для попыток отправки по умолчанию
+	clientTimeoutConst  = 10             // таймаут для HTTP клиента по умолчанию
+	dlqTopicConst       = "my-topic-DLQ" // топик для DLQ
+	workersCountConst   = 5              // количество параллельных обработчиков в пайплайне
 )
 
 // OrderResponse структура для ответов из api (копия из postOrders.go)
@@ -55,20 +54,19 @@ type BatchInfo struct {
 
 // ConsumerConfig описывает настройки с учётом переменных окружения
 type ConsumerConfig struct {
-	Topic           string        // имя топика (коррелируется с продюсером)
-	GroupID         string        // имя группы
-	KafkaHost       string        // имя службы (контейнера) в сети докера
-	KafkaPort       int           // порт, на котором сидит kafka
-	LimitConsumWork time.Duration // время работы консумера в секундах
-	ServiceHost     string        // имя службы (контейнера) в сети докера
-	ServicePort     int           // порт принимающего api-сервиса
-	BatchSize       int           // количество сообщений в батче
-	BatchTimeout    time.Duration // время наполнения батча, мс
-	MaxRetries      int           // количество повторных попыток связи
-	RetryDelayBase  time.Duration // базовая задержка для попыток связи
-	ClientTimeout   time.Duration // таймаут для HTTP клиента
-	DlqTopic        string        // топик для DLQ
-	WorkersCount    int           // количество параллельных обработчиков в пайплайне
+	Topic          string        // имя топика (коррелируется с продюсером)
+	GroupID        string        // имя группы
+	KafkaHost      string        // имя службы (контейнера) в сети докера
+	KafkaPort      int           // порт, на котором сидит kafka
+	ServiceHost    string        // имя службы (контейнера) в сети докера
+	ServicePort    int           // порт принимающего api-сервиса
+	BatchSize      int           // количество сообщений в батче
+	BatchTimeout   time.Duration // время наполнения батча, с
+	MaxRetries     int           // количество повторных попыток связи
+	RetryDelayBase time.Duration // базовая задержка для попыток связи
+	ClientTimeout  time.Duration // таймаут для HTTP клиента
+	DlqTopic       string        // топик для DLQ
+	WorkersCount   int           // количество параллельных обработчиков в пайплайне
 }
 
 var cfg *ConsumerConfig
@@ -103,20 +101,19 @@ func getEnvInt(envVariable string, defaultValue int) int {
 func readConfig() *ConsumerConfig {
 
 	return &ConsumerConfig{
-		Topic:           getEnvString("TOPIC_NAME_STR", topicNameConst),
-		GroupID:         getEnvString("GROUP_ID_NAME_STR", groupIDNameConst),
-		KafkaHost:       getEnvString("KAFKA_HOST_NAME", kafkaHostConst),
-		KafkaPort:       getEnvInt("KAFKA_PORT_NUM", kafkaPortConst),
-		LimitConsumWork: time.Duration(getEnvInt("TIME_LIMIT_CONSUMER_S", limitConsumWorkConst)) * time.Second,
-		ServiceHost:     getEnvString("SERVICE_HOST_NAME", serviceHostConst),
-		ServicePort:     getEnvInt("SERVICE_PORT_NUM", servicePortConst),
-		BatchSize:       getEnvInt("BATCH_SIZE_NUM", batchSizeConst),
-		BatchTimeout:    time.Duration(getEnvInt("BATCH_TIMEOUT_MS", batchTimeoutMsConst)) * time.Millisecond,
-		MaxRetries:      getEnvInt("MAX_RETRIES_NUM", maxRetriesConst),
-		RetryDelayBase:  time.Duration(getEnvInt("RETRY_DELEY_BASE_MS", retryDelayBaseConst)) * time.Millisecond,
-		ClientTimeout:   time.Duration(getEnvInt("CLIENT_TIMEOUT_S", clientTimeoutConst)) * time.Second,
-		DlqTopic:        getEnvString("DLQ_TOPIC_NAME_STR", dlqTopicConst),
-		WorkersCount:    getEnvInt("WORKERS_COUNT", workersCountConst),
+		Topic:          getEnvString("TOPIC_NAME_STR", topicNameConst),
+		GroupID:        getEnvString("GROUP_ID_NAME_STR", groupIDNameConst),
+		KafkaHost:      getEnvString("KAFKA_HOST_NAME", kafkaHostConst),
+		KafkaPort:      getEnvInt("KAFKA_PORT_NUM", kafkaPortConst),
+		ServiceHost:    getEnvString("SERVICE_HOST_NAME", serviceHostConst),
+		ServicePort:    getEnvInt("SERVICE_PORT_NUM", servicePortConst),
+		BatchSize:      getEnvInt("BATCH_SIZE_NUM", batchSizeConst),
+		BatchTimeout:   time.Duration(getEnvInt("BATCH_TIMEOUT_S", batchTimeoutConst)) * time.Second,
+		MaxRetries:     getEnvInt("MAX_RETRIES_NUM", maxRetriesConst),
+		RetryDelayBase: time.Duration(getEnvInt("RETRY_DELEY_BASE_MS", retryDelayBaseConst)) * time.Millisecond,
+		ClientTimeout:  time.Duration(getEnvInt("CLIENT_TIMEOUT_S", clientTimeoutConst)) * time.Second,
+		DlqTopic:       getEnvString("DLQ_TOPIC_NAME_STR", dlqTopicConst),
+		WorkersCount:   getEnvInt("WORKERS_COUNT", workersCountConst),
 	}
 }
 
@@ -157,7 +154,7 @@ func consumer(ctx context.Context, errCh chan<- error, endCh chan struct{}) {
 		GroupID:  cfg.GroupID,
 		MinBytes: 10000,  // минимальный пакет
 		MaxBytes: 500000, // максимальный пакет батчей
-		//		MaxWait:  cfg.BatchTimeout,
+		MaxWait:  cfg.BatchTimeout,
 	})
 	defer func() {
 		if err := r.Close(); err != nil {
@@ -225,26 +222,22 @@ func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messages chan<- *kafka
 	outCounter := 0 // счётчик отправленных в канал сообщений
 	for {
 
-		select {
-		default:
-			msg, err := r.FetchMessage(context.Background())
-			if err != nil {
-				if errors.Is(err, context.DeadlineExceeded) {
-					continue
-				}
+		msg, err := r.FetchMessage(ctx)
+		if err != nil {
+			// если контекст отменили (graceful shutdown)
+			if errors.Is(err, context.Canceled) {
 				log.Printf("readMsgOfKafka: считано из kafka %d сообщений, отправлено на батчирование %d сообщений, за %v с.\n", inCounter, outCounter, time.Since(start).Seconds())
-				errCh <- err // оповещаем main() и выходим, конвейер продолжает обработку уже вычитанных сообщений
+				errCh <- nil // оповещаем main() и выходим, конвейер продолжает обработку уже вычитанных сообщений
 				return
 			}
-
-			inCounter++
-			messages <- &msg
-			outCounter++
-
-		case <-ctx.Done():
 			log.Printf("readMsgOfKafka: считано из kafka %d сообщений, отправлено на батчирование %d сообщений, за %v с.\n", inCounter, outCounter, time.Since(start).Seconds())
-			return // при выходе закрывается errCh и в main() снимается блокировка, конвейер продолжает обработку уже вычитанных сообщений
+			errCh <- err // оповещаем main() и выходим, конвейер продолжает обработку уже вычитанных сообщений
+			return
 		}
+
+		inCounter++
+		messages <- &msg
+		outCounter++
 	}
 }
 
@@ -584,7 +577,7 @@ func main() {
 	cfg = readConfig()
 
 	// заведём контекст для отмены работы консумера
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.LimitConsumWork)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// обработка сигналов ОС для graceful shutdown
