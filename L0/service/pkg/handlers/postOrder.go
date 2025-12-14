@@ -18,11 +18,9 @@ import (
 
 // OrderResponse структура для ответов по каждому сообщению в батче от консумера
 type OrderResponse struct {
-	OrderUID     string `json:"order_uid"`         // идентификатор сообщения
-	Status       string `json:"status"`            // статус: "success", "conflict", "badRequest", "error"
-	Message      string `json:"message,omitempty"` // информация об ошибке
-	ShouldCommit bool   `json:"shouldCommit"`      // можно ли коммитить в кафке
-	ShouldDLQ    bool   `json:"shouldDLQ"`         // надо ли отправить в DLQ
+	OrderUID string `json:"order_uid"`         // идентификатор сообщения
+	Status   string `json:"status"`            // статус: "success", "conflict", "badRequest" (в DLQ), "error" (в DLQ)
+	Message  string `json:"message,omitempty"` // информация об ошибке
 }
 
 // PostOrder принимает json с информацией о заказе и сохраняет данные в базе
@@ -126,11 +124,9 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		// проверяем валидацию
 		if err, ok := validationResults[orderUID]; ok {
 			responses[i] = OrderResponse{
-				OrderUID:     orderUID,
-				Status:       "badRequest",
-				Message:      err.Error(),
-				ShouldCommit: false,
-				ShouldDLQ:    true,
+				OrderUID: orderUID,
+				Status:   "badRequest",
+				Message:  err.Error(),
 			}
 			continue
 		}
@@ -138,11 +134,9 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		// проверяем дубликаты в кэше
 		if cacheDuplicates[orderUID] {
 			responses[i] = OrderResponse{
-				OrderUID:     orderUID,
-				Status:       "conflict",
-				Message:      "заказ уже существует в кэше",
-				ShouldCommit: true,
-				ShouldDLQ:    false,
+				OrderUID: orderUID,
+				Status:   "conflict",
+				Message:  "заказ уже существует в кэше",
 			}
 			continue
 		}
@@ -150,11 +144,9 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		// проверяем дубликаты в БД
 		if dbDuplicates[orderUID] {
 			responses[i] = OrderResponse{
-				OrderUID:     orderUID,
-				Status:       "conflict",
-				Message:      "заказ уже существует в базе",
-				ShouldCommit: true,
-				ShouldDLQ:    false,
+				OrderUID: orderUID,
+				Status:   "conflict",
+				Message:  "заказ уже существует в базе",
 			}
 			continue
 		}
@@ -185,11 +177,9 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		if resp.Status == "" {
 			// если статус пустой, значит что-то пошло не так
 			responses[i] = OrderResponse{
-				OrderUID:     orders[i].OrderUID,
-				Status:       "error",
-				Message:      "неизвестная ошибка обработки",
-				ShouldCommit: false,
-				ShouldDLQ:    true,
+				OrderUID: orders[i].OrderUID,
+				Status:   "error",
+				Message:  "неизвестная ошибка обработки",
 			}
 		}
 	}
@@ -243,11 +233,9 @@ func saveOrdersBatch(orders []*models.Order) map[string]OrderResponse {
 			// помечаем все заказы как ошибки
 			for _, order := range orders {
 				results[order.OrderUID] = OrderResponse{
-					OrderUID:     order.OrderUID,
-					Status:       "error",
-					Message:      "внутренняя ошибка сервера",
-					ShouldCommit: false,
-					ShouldDLQ:    true,
+					OrderUID: order.OrderUID,
+					Status:   "error",
+					Message:  "внутренняя ошибка сервера",
 				}
 			}
 		}
@@ -266,11 +254,9 @@ func saveOrdersBatch(orders []*models.Order) map[string]OrderResponse {
 		log.Printf("Ошибка при сохранении заказов: %v", result.Error)
 		for _, order := range orders {
 			results[order.OrderUID] = OrderResponse{
-				OrderUID:     order.OrderUID,
-				Status:       "error",
-				Message:      result.Error.Error(),
-				ShouldCommit: false,
-				ShouldDLQ:    true,
+				OrderUID: order.OrderUID,
+				Status:   "error",
+				Message:  result.Error.Error(),
 			}
 		}
 		return results
@@ -281,11 +267,9 @@ func saveOrdersBatch(orders []*models.Order) map[string]OrderResponse {
 		log.Printf("Ошибка при коммите транзакции: %v", commitResult.Error)
 		for _, order := range orders {
 			results[order.OrderUID] = OrderResponse{
-				OrderUID:     order.OrderUID,
-				Status:       "error",
-				Message:      "ошибка сохранения в базу",
-				ShouldCommit: false,
-				ShouldDLQ:    true,
+				OrderUID: order.OrderUID,
+				Status:   "error",
+				Message:  "ошибка сохранения в базу",
 			}
 		}
 		return results
@@ -318,11 +302,9 @@ func saveOrdersBatch(orders []*models.Order) map[string]OrderResponse {
 	// добавляем успешные ответы
 	for _, order := range orders {
 		results[order.OrderUID] = OrderResponse{
-			OrderUID:     order.OrderUID,
-			Status:       "success",
-			Message:      "заказ успешно добавлен в базу",
-			ShouldCommit: true,
-			ShouldDLQ:    false,
+			OrderUID: order.OrderUID,
+			Status:   "success",
+			Message:  "заказ успешно добавлен в базу",
 		}
 	}
 
