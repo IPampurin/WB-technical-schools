@@ -30,11 +30,11 @@ services:
     command:
       - "postgres"
       - "-c"
-      - "shared_buffers=256MB"          # увеличим кэш postgres
+      - "shared_buffers=1GB"            # увеличим кэш postgres
       - "-c"
-      - "maintenance_work_mem=64MB"    # увеличим для служебных операций (быстрее создание индексов)
+      - "maintenance_work_mem=512MB"    # увеличим для служебных операций (быстрее создание индексов)
       - "-c"
-      - "wal_buffers=16MB"              # увеличим буфер журнала транзакций
+      - "wal_buffers=64MB"              # увеличим буфер журнала транзакций
     volumes:
       - postgres-db:/var/lib/postgresql/data
     healthcheck:
@@ -56,6 +56,12 @@ services:
       - REDIS_PASSWORD=${REDIS_PASSWORD}
       - REDIS_DB=${REDIS_DB}
       - REDIS_TTL=${REDIS_TTL}
+    command: 
+    - "redis-server"
+    - "--maxmemory 256mb"                  # Лимит памяти
+    - "--maxmemory-policy volatile-lru"    # Вытесняем только ключи с TTL
+    - "--save ''"                          # Отключаем автоматический снапшот на диск (считаем, что персистентность не нужна, так как это чистый кэш)
+    - "--appendonly no"                    # Отключаем AOF, так как персистентность не критична
     volumes:
       - redis_data:/data
     healthcheck:

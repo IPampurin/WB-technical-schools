@@ -32,7 +32,7 @@ const (
 	batchTimeoutConst   = 5              // время наполнения батча по умолчанию, с
 	maxRetriesConst     = 3              // количество повторных попыток отправки батчей в api по умолчанию
 	retryDelayBaseConst = 100            // базовая задержка для попыток отправки по умолчанию
-	clientTimeoutConst  = 10             // таймаут для HTTP клиента по умолчанию
+	clientTimeoutConst  = 30             // таймаут для HTTP клиента по умолчанию
 	dlqTopicConst       = "my-topic-DLQ" // топик для DLQ
 )
 
@@ -167,10 +167,12 @@ func consumer(ctx context.Context, errCh chan<- error, endCh chan struct{}) {
 	log.Printf("DLQ writer консумера подписан на топик '%s'.\n", dlqWriter.Topic)
 	log.Println("Начинаем вычитывать !!!")
 
-	// TODO поиграть с размером буферов исходя из ожидаемой пропускной способности пайплайна. Интересно: есть ли какая-то формула?
-	messages := make(chan *kafka.Message, cfg.BatchSize*5) // канал для входящих сообщений с большим буфером
-	batches := make(chan []*kafka.Message, 5*5)            // канал для передачи батчей
-	responses := make(chan *BatchInfo, 5*5)                // канал передачи ответов по батчам и мап с сообщениями
+	// размер буферов каналов следует назначать исходя из сетевых задержек и ожидаемой пропускной
+	// способности пайплайна. Интересно: есть ли какая-то формула или практический подход?
+	// Слишком большой размер буферов приводит к длительному grace периоду при остановке контейнера.
+	messages := make(chan *kafka.Message, cfg.BatchSize*10) // канал для входящих сообщений с большим буфером
+	batches := make(chan []*kafka.Message, cfg.BatchSize/4) // канал для передачи батчей
+	responses := make(chan *BatchInfo, cfg.BatchSize/4)     // канал передачи ответов по батчам и мап с сообщениями
 
 	// wgPipe для ожидания всех горутин конвейера
 	var wgPipe sync.WaitGroup
@@ -194,8 +196,8 @@ func consumer(ctx context.Context, errCh chan<- error, endCh chan struct{}) {
 	// ждём окончания обработки всех считанных readMsgOfKafka сообщений
 	wgPipe.Wait()
 
-	// close(errCh) уже выполнился  при выходе из readMsgOfKafka
-	// close(endCh) уже выполнился  при выходе из processBatchResponse
+	// close(errCh) уже выполнился при выходе из readMsgOfKafka
+	// close(endCh) уже выполнился при выходе из processBatchResponse
 }
 
 // readMsgOfKafka читает сообщения из кафки и наполняет канал messages
@@ -209,9 +211,11 @@ func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messages chan<- *kafka
 		// закрываем при выходе канал messages, чтобы по мере обработки
 		// сообщений из канала завершили работу последующие этапы обработки
 		close(messages)
+		log.Println("readMsgOfKafka: закрыл канал messages.")
 
 		// закрываем при выходе канал errCh, чтобы разблокировать main()
 		close(errCh)
+		log.Println("readMsgOfKafka: закрыл канал errCh.")
 	}()
 
 	inCounter := 0  // счётчик входящих сообщений для логирования
@@ -237,7 +241,7 @@ func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messages chan<- *kafka
 		messages <- &msg
 		outCounter++
 
-		if inCounter%5000 == 0 {
+		if inCounter%10000 == 0 {
 			log.Printf("readMsgOfKafka: получено %d сообщений, отправлено на батчирование %d сообщений, за %v с.\n",
 				inCounter, outCounter, time.Since(start).Seconds())
 		}
@@ -250,10 +254,11 @@ func complectBatches(messages <-chan *kafka.Message, batches chan<- []*kafka.Mes
 
 	defer wgPipe.Done()
 
+	// закрываем при выходе канал batches, чтобы по мере обработки
+	// сообщений из канала завершили работу последующие этапы обработки
 	defer func() {
-		// закрываем при выходе канал batches, чтобы по мере обработки
-		// сообщений из канала завершили работу последующие этапы обработки
 		close(batches)
+		log.Println("complectBatches: закрыл канал batches.")
 	}()
 
 	start := time.Now()
@@ -300,7 +305,7 @@ func complectBatches(messages <-chan *kafka.Message, batches chan<- []*kafka.Mes
 				sendBatch()
 			}
 
-			if inCounter%5000 == 0 {
+			if inCounter%10000 == 0 {
 				log.Printf("complectBatches: получено %d сообщений, отправлено %d сообщений в %d батчах, за %v c.\n",
 					inCounter, lenCounter, batchCounter, time.Since(start).Seconds())
 			}
@@ -314,10 +319,11 @@ func batchWorker(dlqWriter *kafka.Writer, httpClient *http.Client, batches <-cha
 
 	defer wgPipe.Done()
 
+	// закрываем при выходе канал responses, чтобы по мере обработки
+	// сообщений из канала завершили работу последующие этапы обработки
 	defer func() {
-		// закрываем при выходе канал responses, чтобы по мере обработки
-		// сообщений из канала завершили работу последующие этапы обработки
 		close(responses)
+		log.Println("batchWorker: закрыл канал responses.")
 	}()
 
 	start := time.Now()
@@ -362,7 +368,7 @@ func batchWorker(dlqWriter *kafka.Writer, httpClient *http.Client, batches <-cha
 		// полученный ответ это []OrderResponse, в котором orderUID-ы это ключи для мапы [orderUID]->message
 		response, err := sendBatchWithRetry(httpClient, jsonMessages)
 		if err != nil {
-			// TODO предусмотреть логику случая с отпавшим api
+			// если api отпало, то сообщения идут в DLQ - возможно, стоит предусмотреть "аварийный" топик на этот случай
 			log.Printf("batchWorker: ошибка отправки батча: %v", err)
 			// при критической ошибке отправляем все в DLQ и идём за новой порцией сообщений
 			for i := range batch {
@@ -385,7 +391,7 @@ func batchWorker(dlqWriter *kafka.Writer, httpClient *http.Client, batches <-cha
 		}
 		responses <- batchInfo
 
-		if lenBatches%5000 == 0 {
+		if lenBatches%10000 == 0 {
 			log.Printf("batchWorker: обработано %d батчей, из %d сообщений, ответов api на запросы %d, ответов api для %d сообщений, сообщений в DLQ %d, за %v c.\n",
 				batchCounter, lenBatches, respCounter, counterRespMsg, counterDLQ, time.Since(start).Seconds())
 		}
@@ -499,10 +505,10 @@ func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responses <-
 
 	defer wgPipe.Done()
 
+	// закрываем при выходе канал endCh, чтобы разблокировать main()
 	defer func() {
-		// закрываем при выходе канал endCh, чтобы разблокировать main()
 		close(endCh)
-		log.Println("Канал endCh закрыт.")
+		log.Println("processBatchResponse: закрыл кнал endCh.")
 	}()
 
 	start := time.Now()
@@ -516,7 +522,7 @@ func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responses <-
 
 		batchApi++
 		msgApiAnswer += len(batchInfo.respOfBatch)
-		if msgApiAnswer%5000 == 0 {
+		if msgApiAnswer%10000 == 0 {
 			log.Printf("processBatchResponse: от api поступило ответов %d для %d сообщений, отправлено в DLQ: %d, за %v c.\n",
 				batchApi, msgApiAnswer, toDLQ, time.Since(start).Seconds())
 		}
@@ -532,7 +538,8 @@ func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responses <-
 				continue
 			}
 
-			if resp.Status == "badRequest" || resp.Status == "error" {
+			// в DLQ отправляем не только явные ошибки, но и дубликаты сообщений (для выявления возможных причин появления)
+			if resp.Status == "badRequest" || resp.Status == "error" || resp.Status == "conflict" {
 				sendToDLQ(dlqWriter, msg, resp.Message)
 				toDLQ++
 			}
@@ -540,8 +547,8 @@ func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responses <-
 
 		// коммитим один раз весь батч по последнему сообщению в батче
 		if err := r.CommitMessages(context.Background(), *batchInfo.lastBatchMessage); err != nil {
-			log.Printf("processBatchResponse: ошибка коммита батча по сообщению сообщению %s: %v", string(batchInfo.lastBatchMessage.Key), err)
-			// TODO возможно следует добавить логику смещения к предыдущему сообщению или любому сообщению в батче
+			log.Printf("processBatchResponse: ошибка коммита батча по сообщению %s: %v", string(batchInfo.lastBatchMessage.Key), err)
+			// TODO возможно следует добавить логику смещения к предыдущему сообщению или просто любому сообщению в батче, чтобы закоммитить хоть что-то
 		}
 	}
 
@@ -576,7 +583,7 @@ func main() {
 	}()
 
 	// запускаем основной код консумера
-	consumer(ctx, errCh, endCh)
+	go consumer(ctx, errCh, endCh)
 
 	// ждём получения ошибки или nil из логики конвейера
 	// ошибки: нет возможности читать сообщения из брокера или нет возможности заполнять DLQ
@@ -588,5 +595,7 @@ func main() {
 
 	<-endCh // завершился последний воркер в конвейере обработки
 
-	log.Println("Консумер корректно завершил работу.")
+	if err == nil {
+		log.Println("Консумер корректно завершил работу.")
+	}
 }

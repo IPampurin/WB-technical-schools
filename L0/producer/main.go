@@ -107,6 +107,10 @@ func sendMessages(ctx context.Context, w *kafka.Writer, generatedCount, countSen
 				atomic.AddInt64(failedCount, 1)
 			} else {
 				atomic.AddInt64(countSended, 1)
+				if *countSended%10000 == 0 {
+					log.Printf("Отправлено %d сообщений.\n", *countSended)
+				}
+
 			}
 		case <-ctx.Done():
 			return

@@ -1,7 +1,7 @@
 version: '3'
 services:
   kafka:
-    image: apache/kafka:latest
+    image: apache/kafka:4.1.1
     container_name: ${KAFKA_HOST_NAME:-kafka}
     env_file:
       - .env
