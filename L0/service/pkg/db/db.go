@@ -104,7 +104,22 @@ func ConnectDB() error {
 // runMigrations выполняет последовательное создание всех таблиц базы данных
 // таблицы создаются в порядке зависимостей: сначала родительские, затем дочерние
 func runMigrations(db *gorm.DB) error {
-	// Создаем таблицы в правильном порядке с учетом зависимостей
+
+	// проверяем, существует ли уже таблица orders (если создана другим инстансом сервиса)
+	var exists bool
+	err := db.Raw("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'orders')").Scan(&exists).Error
+	if err != nil {
+		return err
+	}
+
+	if exists {
+		log.Println("Таблицы уже существуют, пропускаем миграции.")
+		return nil
+	}
+
+	log.Println("Выполняем миграции...")
+
+	// создаем таблицы в правильном порядке с учетом зависимостей
 	migrations := []func(*gorm.DB) error{
 		createOrdersTable,     // основная таблица заказов (родительская)
 		createDeliveriesTable, // таблица доставки (зависит от orders)

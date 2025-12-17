@@ -1,14 +1,37 @@
 version: '3.9'
 
 services:
-  service:
+  
+  # балансировщик nginx
+  nginx:
+    image: nginx:1.29.4-alpine
+    container_name: ${SERVICE_HOST_NAME:-nginx}
+    environment:
+      - CLIENT_MAX_BODY_SIZE=10m  
+    ports:
+      - "${SERVICE_PORT:-8081}:80"  # веб-интерфейс
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - service1
+      - service2
+      - service3
+      - service4
+      - service5
+    networks:
+      - backend
+      - kafka_frontend
+    restart: unless-stopped
+
+  # пять инстансов сервиса
+  service1:
     build: .
+    container_name: ${SERVICE_HOST_NAME:-service}1
+    hostname: ${SERVICE_HOST_NAME:-service}1
+    expose:
+      - "8081"
     env_file:
       - .env
-    container_name: ${SERVICE_HOST_NAME:-service}
-    hostname: service
-    ports:
-      - ${SERVICE_PORT}:8081
     depends_on:
       postgres:
         condition: service_healthy
@@ -18,6 +41,88 @@ services:
     networks:
       - backend
       - kafka_frontend
+    environment:
+      - INSTANCE_ID=1
+
+  service2:
+    build: .
+    container_name: ${SERVICE_HOST_NAME:-service}2
+    hostname: ${SERVICE_HOST_NAME:-service}2
+    expose:
+      - "8081"
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy 
+    stop_grace_period: 45s
+    networks:
+      - backend
+      - kafka_frontend
+    environment:
+      - INSTANCE_ID=2
+
+  service3:
+    build: .
+    container_name: ${SERVICE_HOST_NAME:-service}3
+    hostname: ${SERVICE_HOST_NAME:-service}3
+    expose:
+      - "8081"
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy 
+    stop_grace_period: 45s
+    networks:
+      - backend
+      - kafka_frontend
+    environment:
+      - INSTANCE_ID=3
+
+  service4:
+    build: .
+    container_name: ${SERVICE_HOST_NAME:-service}4
+    hostname: ${SERVICE_HOST_NAME:-service}4
+    expose:
+      - "8081"
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy 
+    stop_grace_period: 45s
+    networks:
+      - backend
+      - kafka_frontend
+    environment:
+      - INSTANCE_ID=4
+
+  service5:
+    build: .
+    container_name: ${SERVICE_HOST_NAME:-service}5
+    hostname: ${SERVICE_HOST_NAME:-service}5
+    expose:
+      - "8081"
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy 
+    stop_grace_period: 45s
+    networks:
+      - backend
+      - kafka_frontend
+    environment:
+      - INSTANCE_ID=5
 
   postgres:
     image: postgres:16
@@ -37,6 +142,8 @@ services:
       - "maintenance_work_mem=512MB"    # увеличим для служебных операций (быстрее создание индексов)
       - "-c"
       - "wal_buffers=64MB"              # увеличим буфер журнала транзакций
+      - "-c"
+      - "max_connections=200"
     volumes:
       - postgres-db:/var/lib/postgresql/data
     healthcheck:

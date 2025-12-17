@@ -204,7 +204,7 @@ func TestReadConfig(t *testing.T) {
 				GroupID:         groupIDNameConst,
 				KafkaPort:       kafkaPortConst,
 				LimitConsumWork: time.Duration(limitConsumWorkConst) * time.Second,
-				ServicePort:     servicePortConst,
+				ApiPort:         apiPortConst,
 				BatchSize:       batchSizeConst,
 				BatchTimeout:    time.Duration(batchTimeoutConst) * time.Millisecond,
 				MaxRetries:      maxRetriesConst,
@@ -228,7 +228,7 @@ func TestReadConfig(t *testing.T) {
 				GroupID:         "custom-group",
 				KafkaPort:       kafkaPortConst, // остается по умолчанию
 				LimitConsumWork: time.Duration(limitConsumWorkConst) * time.Second,
-				ServicePort:     9090,
+				ApiPort:         9090,
 				BatchSize:       500,
 				BatchTimeout:    time.Duration(batchTimeoutConst) * time.Millisecond,
 				MaxRetries:      maxRetriesConst,
@@ -259,7 +259,7 @@ func TestReadConfig(t *testing.T) {
 				GroupID:         "test-group",
 				KafkaPort:       9093,
 				LimitConsumWork: 30 * time.Second,
-				ServicePort:     8082,
+				ApiPort:         8082,
 				BatchSize:       150,
 				BatchTimeout:    2000 * time.Millisecond,
 				MaxRetries:      5,
@@ -282,7 +282,7 @@ func TestReadConfig(t *testing.T) {
 				GroupID:         groupIDNameConst,
 				KafkaPort:       kafkaPortConst, // значение по умолчанию при ошибке парсинга
 				LimitConsumWork: time.Duration(limitConsumWorkConst) * time.Second,
-				ServicePort:     servicePortConst,
+				ApiPort:         apiPortConst,
 				BatchSize:       batchSizeConst,
 				BatchTimeout:    time.Duration(batchTimeoutConst) * time.Millisecond,
 				MaxRetries:      maxRetriesConst,
@@ -309,7 +309,7 @@ func TestReadConfig(t *testing.T) {
 			assert.Equal(t, tt.expected.GroupID, config.GroupID, "GroupID не совпадает")
 			assert.Equal(t, tt.expected.KafkaPort, config.KafkaPort, "KafkaPort не совпадает")
 			assert.Equal(t, tt.expected.LimitConsumWork, config.LimitConsumWork, "LimitConsumWork не совпадает")
-			assert.Equal(t, tt.expected.ServicePort, config.ServicePort, "ServicePort не совпадает")
+			assert.Equal(t, tt.expected.ApiPort, config.ApiPort, "ServicePort не совпадает")
 			assert.Equal(t, tt.expected.BatchSize, config.BatchSize, "BatchSize не совпадает")
 			assert.Equal(t, tt.expected.BatchTimeout, config.BatchTimeout, "BatchTimeout не совпадает")
 			assert.Equal(t, tt.expected.MaxRetries, config.MaxRetries, "MaxRetries не совпадает")

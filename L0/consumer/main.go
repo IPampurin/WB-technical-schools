@@ -27,7 +27,7 @@ const (
 	kafkaHostConst      = "kafka"        // имя службы (контейнера) в сети докера по умолчанию
 	kafkaPortConst      = 9092           // порт, на котором сидит kafka по умолчанию
 	serviceHostConst    = "service"      // имя службы (контейнера) в сети докера по умолчанию
-	servicePortConst    = 8081           // порт принимающего api-сервиса по умолчанию
+	apiPortConst        = 8081           // порт принимающего api-сервиса по умолчанию
 	batchSizeConst      = 1000           // количество сообщений в батче по умолчанию
 	batchTimeoutConst   = 5              // время наполнения батча по умолчанию, с
 	maxRetriesConst     = 3              // количество повторных попыток отправки батчей в api по умолчанию
@@ -57,7 +57,7 @@ type ConsumerConfig struct {
 	KafkaHost      string        // имя службы (контейнера) в сети докера
 	KafkaPort      int           // порт, на котором сидит kafka
 	ServiceHost    string        // имя службы (контейнера) в сети докера
-	ServicePort    int           // порт принимающего api-сервиса
+	ApiPort        int           // порт принимающего api-сервиса
 	BatchSize      int           // количество сообщений в батче
 	BatchTimeout   time.Duration // время наполнения батча, с
 	MaxRetries     int           // количество повторных попыток связи
@@ -103,7 +103,7 @@ func readConfig() *ConsumerConfig {
 		KafkaHost:      getEnvString("KAFKA_HOST_NAME", kafkaHostConst),
 		KafkaPort:      getEnvInt("KAFKA_PORT_NUM", kafkaPortConst),
 		ServiceHost:    getEnvString("SERVICE_HOST_NAME", serviceHostConst),
-		ServicePort:    getEnvInt("SERVICE_PORT_NUM", servicePortConst),
+		ApiPort:        getEnvInt("API_PORT", apiPortConst),
 		BatchSize:      getEnvInt("BATCH_SIZE_NUM", batchSizeConst),
 		BatchTimeout:   time.Duration(getEnvInt("BATCH_TIMEOUT_S", batchTimeoutConst)) * time.Second,
 		MaxRetries:     getEnvInt("MAX_RETRIES_NUM", maxRetriesConst),
@@ -160,6 +160,16 @@ func consumer(ctx context.Context, errCh chan<- error, endCh chan struct{}) {
 
 	// клиент для отправки вычитанных из кафки сообщений на api сервиса
 	httpClient := &http.Client{
+		Transport: &http.Transport{
+			MaxIdleConns:          1000,
+			MaxIdleConnsPerHost:   1000,
+			MaxConnsPerHost:       1000,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			DisableKeepAlives:     false,
+			ForceAttemptHTTP2:     true,
+		},
 		Timeout: cfg.ClientTimeout,
 	}
 
@@ -451,7 +461,7 @@ func sendToDLQ(w *kafka.Writer, msg *kafka.Message, reason string) {
 func sendBatchWithRetry(client *http.Client, data []json.RawMessage) ([]OrderResponse, error) {
 
 	// определяем адрес отправки
-	apiURL := fmt.Sprintf("http://%s:%d/order", cfg.ServiceHost, cfg.ServicePort)
+	apiURL := fmt.Sprintf("http://%s:%d/order", cfg.ServiceHost, cfg.ApiPort)
 
 	// формируем тело запроса
 	requestBody, err := json.Marshal(data)
