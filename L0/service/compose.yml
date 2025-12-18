@@ -9,7 +9,7 @@ services:
     environment:
       - CLIENT_MAX_BODY_SIZE=10m  
     ports:
-      - "${SERVICE_PORT:-8081}:80"    # веб-интерфейс
+      - "${SERVICE_PORT:-8081}:8081"    # веб-интерфейс
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:

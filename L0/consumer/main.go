@@ -27,24 +27,32 @@ const (
 	kafkaHostConst      = "kafka"        // имя службы (контейнера) в сети докера по умолчанию
 	kafkaPortConst      = 9092           // порт, на котором сидит kafka по умолчанию
 	serviceHostConst    = "service"      // имя службы (контейнера) в сети докера по умолчанию
-	apiPortConst        = 8081           // порт принимающего api-сервиса по умолчанию
+	servicePortConst    = 8081           // порт принимающего api-сервиса по умолчанию
 	batchSizeConst      = 1000           // количество сообщений в батче по умолчанию
 	batchTimeoutConst   = 5              // время наполнения батча по умолчанию, с
 	maxRetriesConst     = 3              // количество повторных попыток отправки батчей в api по умолчанию
 	retryDelayBaseConst = 100            // базовая задержка для попыток отправки по умолчанию
+	countClientConst    = 5              // количество отправителей батчей в api по умолчанию
 	clientTimeoutConst  = 30             // таймаут для HTTP клиента по умолчанию
 	dlqTopicConst       = "my-topic-DLQ" // топик для DLQ
 )
 
-// OrderResponse структура для ответов из api (копия из postOrders.go)
+// PrepareBatch структура для параллельной отправки ограниченного величиной COUNT_CLIENT количества батчей в api
+type PrepareBatch struct {
+	batchMessage     []json.RawMessage         // указатели на подготовленные к отправке в api сообщения
+	messageByUID     map[string]*kafka.Message // мапа идентификации [orderUID]kafka.Message
+	lastBatchMessage *kafka.Message            // указатель на последнее сообщение в батче, чтобы коммитить весь батч, так как порядок сообщений сохраняется
+}
+
+// OrderResponse структура для ответов из api (копия из postOrder.go)
 type OrderResponse struct {
 	OrderUID string `json:"order_uid"`         // идентификатор сообщения
 	Status   string `json:"status"`            // статус: "success", "conflict", "badRequest", "error"
 	Message  string `json:"message,omitempty"` // информация об ошибке
 }
 
-// BatchInfo объединяет информацию об ответах api по сообщениям с самими сообщениями
-type BatchInfo struct {
+// RespBatchInfo объединяет информацию об ответах api по сообщениям с самими сообщениями
+type RespBatchInfo struct {
 	respOfBatch      []OrderResponse           // ответы по каждому из сообщений батча
 	messageByUID     map[string]*kafka.Message // мапа идентификации [orderUID]kafka.Message
 	lastBatchMessage *kafka.Message            // указатель на последнее сообщение в батче, чтобы коммитить весь батч, так как порядок сообщений сохраняется
@@ -57,11 +65,12 @@ type ConsumerConfig struct {
 	KafkaHost      string        // имя службы (контейнера) в сети докера
 	KafkaPort      int           // порт, на котором сидит kafka
 	ServiceHost    string        // имя службы (контейнера) в сети докера
-	ApiPort        int           // порт принимающего api-сервиса
+	ServicePort    int           // порт принимающего api-сервиса
 	BatchSize      int           // количество сообщений в батче
 	BatchTimeout   time.Duration // время наполнения батча, с
 	MaxRetries     int           // количество повторных попыток связи
 	RetryDelayBase time.Duration // базовая задержка для попыток связи
+	CountClient    int           // количество отправителей батчей в api
 	ClientTimeout  time.Duration // таймаут для HTTP клиента
 	DlqTopic       string        // топик для DLQ
 }
@@ -103,11 +112,12 @@ func readConfig() *ConsumerConfig {
 		KafkaHost:      getEnvString("KAFKA_HOST_NAME", kafkaHostConst),
 		KafkaPort:      getEnvInt("KAFKA_PORT_NUM", kafkaPortConst),
 		ServiceHost:    getEnvString("SERVICE_HOST_NAME", serviceHostConst),
-		ApiPort:        getEnvInt("API_PORT", apiPortConst),
+		ServicePort:    getEnvInt("SERVICE_PORT", servicePortConst),
 		BatchSize:      getEnvInt("BATCH_SIZE_NUM", batchSizeConst),
 		BatchTimeout:   time.Duration(getEnvInt("BATCH_TIMEOUT_S", batchTimeoutConst)) * time.Second,
 		MaxRetries:     getEnvInt("MAX_RETRIES_NUM", maxRetriesConst),
 		RetryDelayBase: time.Duration(getEnvInt("RETRY_DELEY_BASE_MS", retryDelayBaseConst)) * time.Millisecond,
+		CountClient:    getEnvInt("COUNT_CLIENT", countClientConst),
 		ClientTimeout:  time.Duration(getEnvInt("CLIENT_TIMEOUT_S", clientTimeoutConst)) * time.Second,
 		DlqTopic:       getEnvString("DLQ_TOPIC_NAME_STR", dlqTopicConst),
 	}
@@ -167,7 +177,8 @@ func consumer(ctx context.Context, errCh chan<- error, endCh chan struct{}) {
 	// Слишком большой размер буферов приводит к длительному grace периоду при остановке контейнера.
 	messages := make(chan *kafka.Message, cfg.BatchSize*10) // канал для входящих сообщений с большим буфером
 	batches := make(chan []*kafka.Message, cfg.BatchSize/4) // канал для передачи батчей
-	responses := make(chan *BatchInfo, cfg.BatchSize/4)     // канал передачи ответов по батчам и мап с сообщениями
+	prepares := make(chan *PrepareBatch, cfg.BatchSize/4)   // канал для передачи подготовленной информации к отправке в api
+	responses := make(chan *RespBatchInfo, cfg.BatchSize/4) // канал передачи ответов по батчам и мап с сообщениями
 
 	// wgPipe для ожидания всех горутин конвейера
 	var wgPipe sync.WaitGroup
@@ -180,11 +191,15 @@ func consumer(ctx context.Context, errCh chan<- error, endCh chan struct{}) {
 	wgPipe.Add(1)
 	go complectBatches(messages, batches, &wgPipe)
 
-	// 3. отправляем батчи с ретраем и получаем ответы api с информацией по каждому сообщению
+	// 3. подготавливаем информацию для отправки
+	wgPipe.Add(1)
+	go prepareBatchToSending(dlqWriter, batches, prepares, &wgPipe)
+
+	// 4. отправляем батчи с ретраем и получаем ответы api с информацией по каждому сообщению
 	wgPipe.Add(1)
 	go batchWorker(dlqWriter, batches, responses, &wgPipe)
 
-	// 4. обрабатываем ответы api для каждого сообщения - коммитим или заполняем DLQ
+	// 5. обрабатываем ответы api для каждого сообщения - коммитим или заполняем DLQ
 	wgPipe.Add(1)
 	go processBatchResponse(r, dlqWriter, responses, endCh, &wgPipe)
 
@@ -308,17 +323,17 @@ func complectBatches(messages <-chan *kafka.Message, batches chan<- []*kafka.Mes
 	}
 }
 
-// batchWorker получает батчи и направляет в api, ответы передаёт далее на обработку в канал responses
-func batchWorker(dlqWriter *kafka.Writer, batches <-chan []*kafka.Message,
-	responses chan<- *BatchInfo, wgPipe *sync.WaitGroup) {
+// prepareBatchToSending подготавливает информацию по батчу к отправке в api
+func prepareBatchToSending(dlqWriter *kafka.Writer, batches <-chan []*kafka.Message,
+	prepares chan<- *PrepareBatch, wgPipe *sync.WaitGroup) {
 
 	defer wgPipe.Done()
 
-	// закрываем при выходе канал responses, чтобы по мере обработки
+	// закрываем при выходе канал prepares, чтобы по мере обработки
 	// сообщений из канала завершили работу последующие этапы обработки
 	defer func() {
-		close(responses)
-		log.Println("batchWorker: закрыл канал responses.")
+		close(prepares)
+		log.Println("prepareBatchToSending: закрыл канал prepares.")
 	}()
 
 	start := time.Now()
@@ -326,25 +341,23 @@ func batchWorker(dlqWriter *kafka.Writer, batches <-chan []*kafka.Message,
 	batchCounter := 0   // счётчик пришедших батчей
 	lenBatches := 0     // счётчик обработанных сообщений
 	counterDLQ := 0     // количество сообщений, отправленных в DLQ
-	respCounter := 0    // количество ответов по запросам
-	counterRespMsg := 0 // количество ответов по сообщениям (если всё ок, то counterResp = counterDLQ + lenBatches)
+	prepareCounter := 0 // количество подготовленных к отправке в api батчей
 
 	// слушаем канал с группами сообщений
 	for batch := range batches {
 
 		// нулевых батчей приходить не должно, но на всякий случай проверяем
 		if len(batch) == 0 {
-			log.Printf("batchWorker: следующим после батча %d пришёл батч с нулевой длинной.", batchCounter)
+			log.Printf("prepareBatchToSending: следующим после батча %d пришёл батч с нулевой длинной.", batchCounter)
 			continue
 		}
 
-		batchCounter++
-		lenBatches += len(batch)
+		batchCounter++           // подсчитываем пришедшие батчи
+		lenBatches += len(batch) // подсчитываем пришедшие сообщения
 
-		// 1. подготавливаем данные для API
-
-		var jsonMessages []json.RawMessage
-		messageMap := make(map[string]*kafka.Message) // [orderUID]->*message
+		// подготавливаем данные для API
+		jsonMessages := make([]json.RawMessage, 0, len(batch))    // "тело" сообщения
+		messageMap := make(map[string]*kafka.Message, len(batch)) // мапа идентификации [orderUID]->*message
 
 		for i := range batch {
 			// извлекаем orderUID для маппинга
@@ -357,6 +370,57 @@ func batchWorker(dlqWriter *kafka.Writer, batches <-chan []*kafka.Message,
 				sendToDLQ(dlqWriter, batch[i], "not exist OrderUID")
 			}
 		}
+
+		prepareBatch := &PrepareBatch{
+			batchMessage:     jsonMessages,
+			messageByUID:     messageMap,
+			lastBatchMessage: batch[len(batch)-1],
+		}
+
+		prepares <- prepareBatch // отправляем пакет с данными
+		prepareCounter++         // подсчитываем отправленные пакеты данных
+
+		if lenBatches%10000 == 0 {
+			log.Printf("prepareBatchToSending: обработано %d батчей, из %d сообщений, на отправку в api передано %d батчей, сообщений в DLQ %d, за %v c.\n",
+				batchCounter, lenBatches, prepareCounter, counterDLQ, time.Since(start).Seconds())
+		}
+	}
+
+	log.Printf("prepareBatchToSending: канал prepares закрыт, обработано %d батчей, из %d сообщений, на отправку в api передано %d батчей, сообщений в DLQ %d, время работы этапа %v c.\n",
+		batchCounter, lenBatches, prepareCounter, counterDLQ, time.Since(start).Seconds())
+}
+
+// batchWorker получает пакеты данных о батчах и направляет запросы в api, ответы передаёт далее на обработку в канал responses
+func batchWorker(dlqWriter *kafka.Writer, prepares chan<- *PrepareBatch,
+	responses chan<- *RespBatchInfo, wgPipe *sync.WaitGroup) {
+
+	defer wgPipe.Done()
+
+	// закрываем при выходе канал responses, чтобы по мере обработки
+	// сообщений из канала завершили работу последующие этапы обработки
+	defer func() {
+		close(responses)
+		log.Println("batchWorker: закрыл канал responses.")
+	}()
+
+	start := time.Now()
+	/*
+		batchCounter := 0   // счётчик пришедших данных о батчах
+		counterDLQ := 0     // количество сообщений, отправленных в DLQ
+		respCounter := 0    // количество ответов по запросам
+		counterRespMsg := 0 // количество ответов по сообщениям
+	*/
+	// слушаем канал с группами сообщений
+	for batch := range batches {
+
+		// нулевых батчей приходить не должно, но на всякий случай проверяем
+		if len(batch) == 0 {
+			log.Printf("batchWorker: следующим после батча %d пришёл батч с нулевой длинной.", batchCounter)
+			continue
+		}
+
+		batchCounter++
+		lenBatches += len(batch)
 
 		// 2. отправляем батч с повторами
 
@@ -379,12 +443,12 @@ func batchWorker(dlqWriter *kafka.Writer, batches <-chan []*kafka.Message,
 		// 3. объединяем ответ по батчу и мапу [orderUID]->message в структуру
 		//    и шлём в канал для обработки в processBatchResponse
 
-		batchInfo := &BatchInfo{
+		respBatchInfo := &RespBatchInfo{
 			respOfBatch:      response,
 			messageByUID:     messageMap,
 			lastBatchMessage: batch[len(batch)-1],
 		}
-		responses <- batchInfo
+		responses <- respBatchInfo
 
 		if lenBatches%10000 == 0 {
 			log.Printf("batchWorker: обработано %d батчей, из %d сообщений, ответов api на запросы %d, ответов api для %d сообщений, сообщений в DLQ %d, за %v c.\n",
@@ -451,7 +515,7 @@ func sendBatchWithRetry(data []json.RawMessage) ([]OrderResponse, error) {
 	}
 
 	// определяем адрес отправки
-	apiURL := fmt.Sprintf("http://%s:%d/order", cfg.ServiceHost, cfg.ApiPort)
+	apiURL := fmt.Sprintf("http://%s:%d/order", cfg.ServiceHost, cfg.ServicePort)
 
 	// формируем тело запроса
 	requestBody, err := json.Marshal(data)
@@ -501,7 +565,7 @@ func sendBatchWithRetry(data []json.RawMessage) ([]OrderResponse, error) {
 }
 
 // processBatchResponse обрабатывает полученные от api ответы по каждому сообщению из батча
-func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responses <-chan *BatchInfo, endCh chan struct{}, wgPipe *sync.WaitGroup) {
+func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responses <-chan *RespBatchInfo, endCh chan struct{}, wgPipe *sync.WaitGroup) {
 
 	defer wgPipe.Done()
 
