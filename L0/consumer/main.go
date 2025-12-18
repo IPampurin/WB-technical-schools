@@ -158,21 +158,6 @@ func consumer(ctx context.Context, errCh chan<- error, endCh chan struct{}) {
 		}
 	}()
 
-	// клиент для отправки вычитанных из кафки сообщений на api сервиса
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			MaxIdleConns:          1000,
-			MaxIdleConnsPerHost:   1000,
-			MaxConnsPerHost:       1000,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-			DisableKeepAlives:     false,
-			ForceAttemptHTTP2:     true,
-		},
-		Timeout: cfg.ClientTimeout,
-	}
-
 	log.Printf("Консумер подписан на топик '%s' в группе '%s'.\n", r.Config().Topic, r.Config().GroupID)
 	log.Printf("DLQ writer консумера подписан на топик '%s'.\n", dlqWriter.Topic)
 	log.Println("Начинаем вычитывать !!!")
@@ -197,7 +182,7 @@ func consumer(ctx context.Context, errCh chan<- error, endCh chan struct{}) {
 
 	// 3. отправляем батчи с ретраем и получаем ответы api с информацией по каждому сообщению
 	wgPipe.Add(1)
-	go batchWorker(dlqWriter, httpClient, batches, responses, &wgPipe)
+	go batchWorker(dlqWriter, batches, responses, &wgPipe)
 
 	// 4. обрабатываем ответы api для каждого сообщения - коммитим или заполняем DLQ
 	wgPipe.Add(1)
@@ -324,7 +309,7 @@ func complectBatches(messages <-chan *kafka.Message, batches chan<- []*kafka.Mes
 }
 
 // batchWorker получает батчи и направляет в api, ответы передаёт далее на обработку в канал responses
-func batchWorker(dlqWriter *kafka.Writer, httpClient *http.Client, batches <-chan []*kafka.Message,
+func batchWorker(dlqWriter *kafka.Writer, batches <-chan []*kafka.Message,
 	responses chan<- *BatchInfo, wgPipe *sync.WaitGroup) {
 
 	defer wgPipe.Done()
@@ -376,7 +361,7 @@ func batchWorker(dlqWriter *kafka.Writer, httpClient *http.Client, batches <-cha
 		// 2. отправляем батч с повторами
 
 		// полученный ответ это []OrderResponse, в котором orderUID-ы это ключи для мапы [orderUID]->message
-		response, err := sendBatchWithRetry(httpClient, jsonMessages)
+		response, err := sendBatchWithRetry(jsonMessages)
 		if err != nil {
 			// если api отпало, то сообщения идут в DLQ - возможно, стоит предусмотреть "аварийный" топик на этот случай
 			log.Printf("batchWorker: ошибка отправки батча: %v", err)
@@ -458,7 +443,12 @@ func sendToDLQ(w *kafka.Writer, msg *kafka.Message, reason string) {
 }
 
 // sendBatchWithRetry передает сообщение в API с повторами и получет []OrderResponse в ответ
-func sendBatchWithRetry(client *http.Client, data []json.RawMessage) ([]OrderResponse, error) {
+func sendBatchWithRetry(data []json.RawMessage) ([]OrderResponse, error) {
+
+	// клиент для отправки вычитанных из кафки сообщений на api сервиса
+	client := &http.Client{
+		Timeout: cfg.ClientTimeout,
+	}
 
 	// определяем адрес отправки
 	apiURL := fmt.Sprintf("http://%s:%d/order", cfg.ServiceHost, cfg.ApiPort)
