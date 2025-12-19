@@ -906,7 +906,7 @@ func runTestConsumer(brokerAddr, topic, groupID, dlqTopic string) {
 	// 3. отправляем батчи в API
 	wgPipe.Add(1)
 	//defer wgPipe.Done()
-	go batchWorker(dlqWriter, httpClient, batches, responses, &wgPipe)
+	go batchPrepareWorker(dlqWriter, httpClient, batches, responses, &wgPipe)
 
 	// 4. обрабатываем ответы
 	wgPipe.Add(1)
