@@ -18,7 +18,39 @@ import (
 	"time"
 
 	"github.com/segmentio/kafka-go"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
+
+// трейсер
+var tracer trace.Tracer
+
+/*
+трейсинг
+1. Trace одного сообщения через все 6 этапов
+2. Trace обработки батча как единого целого
+3. Trace ретраев к API с детализацией по попыткам
+4. Trace коммитов и DLQ для отладки проблем
+
+метрики (http://localhost:9090/metrics для Grafana)
+1. RPS всего пайплайна по этапам
+2. Время каждого этапа (гистограммы)
+3. Использование памяти в реальном времени
+4. Время ответа API с распределением
+5. Lag консумера для мониторинга отставания
++
+6. Заполненность каналов (узкие места)
+7. Статусы ответов API (качество интеграции)
+8. Количество ретраев (устойчивость)
+*/
 
 // выносим константы конфигурации по умолчанию, чтобы были на виду.
 // для работы программы менять в .env
@@ -57,6 +89,13 @@ type RespBatchInfo struct {
 	respOfBatch      []OrderResponse           // ответы по каждому из сообщений батча
 	messageByUID     map[string]*kafka.Message // мапа идентификации [orderUID]kafka.Message
 	lastBatchMessage *kafka.Message            // указатель на последнее сообщение в батче, чтобы коммитить весь батч, так как порядок сообщений в батче сохраняется
+}
+
+// MessageWithTrace оборачивает kafka.Message вместе с его контекстом трейсинга для передачи trace через этапы пайплайна
+type MessageWithTrace struct {
+	Message *kafka.Message  // само сообщение
+	Ctx     context.Context // контекст, содержащий span этого сообщения
+	Span    trace.Span      // сам span сообщения
 }
 
 // ConsumerConfig описывает настройки с учётом переменных окружения
@@ -127,6 +166,14 @@ func readConfig() *ConsumerConfig {
 // consumer это основной код консумера
 func consumer(ctx context.Context, errCh chan<- error, endCh chan struct{}) {
 
+	// уточняем контекст для трейсинга
+	ctx, span := tracer.Start(ctx, "consumer.pipeline.total")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("kafka.topic", cfg.Topic),
+		attribute.String("kafka.group.id", cfg.GroupID),
+	)
+
 	// устанавливаем соединение с брокером для автосоздания DLQ
 	conn, err := kafka.DialLeader(context.Background(), "tcp", fmt.Sprintf("%s:%d", cfg.KafkaHost, cfg.KafkaPort), cfg.DlqTopic, 0)
 	if err != nil {
@@ -176,11 +223,11 @@ func consumer(ctx context.Context, errCh chan<- error, endCh chan struct{}) {
 	// размер буферов каналов следует назначать исходя из сетевых задержек и ожидаемой пропускной
 	// способности пайплайна. Интересно: есть ли какая-то формула или практический подход?
 	// Слишком большой размер буферов приводит к длительному grace периоду при остановке контейнера.
-	messagesCh := make(chan *kafka.Message, cfg.BatchSize*10) // канал для входящих сообщений с большим буфером
-	batchesCh := make(chan []*kafka.Message, cfg.BatchSize/4) // канал для передачи батчей на обработку
-	preparesCh := make(chan *PrepareBatch, cfg.BatchSize/4)   // канал для передачи подготовленной информации к отправке в api
-	collectCh := make(chan []*PrepareBatch, cfg.BatchSize/4)  // канал скомпанованных данных о батчах для параллельной передачи в api
-	responsesCh := make(chan *RespBatchInfo, cfg.BatchSize/4) // канал передачи ответов по батчам и мап с сообщениями
+	messagesCh := make(chan *MessageWithTrace, cfg.BatchSize*10) // канал для входящих сообщений с большим буфером
+	batchesCh := make(chan []*MessageWithTrace, cfg.BatchSize/4) // канал для передачи батчей на обработку
+	preparesCh := make(chan *PrepareBatch, cfg.BatchSize/4)      // канал для передачи подготовленной информации к отправке в api
+	collectCh := make(chan []*PrepareBatch, cfg.BatchSize/4)     // канал скомпанованных данных о батчах для параллельной передачи в api
+	responsesCh := make(chan *RespBatchInfo, cfg.BatchSize/4)    // канал передачи ответов по батчам и мап с сообщениями
 
 	// wgPipe для ожидания всех горутин конвейера
 	var wgPipe sync.WaitGroup
@@ -217,7 +264,7 @@ func consumer(ctx context.Context, errCh chan<- error, endCh chan struct{}) {
 }
 
 // readMsgOfKafka читает сообщения из кафки и наполняет канал messagesCh
-func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messagesCh chan<- *kafka.Message, errCh chan<- error, wgPipe *sync.WaitGroup) {
+func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messagesCh chan<- *MessageWithTrace, errCh chan<- error, wgPipe *sync.WaitGroup) {
 
 	start := time.Now()
 
@@ -254,9 +301,29 @@ func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messagesCh chan<- *kaf
 			return
 		}
 
-		inMsgCounter++     // добавляем входящий счётчик
-		messagesCh <- &msg // отправляем сообщение
-		outMsgCounter++    // добавляем исходящий счётчик
+		// создаем span для конкретного сообщения,
+		// он будет дочерним для span из функции consumer
+		msgCtx, span := tracer.Start(ctx, "kafka.consume.message",
+			trace.WithAttributes(
+				attribute.String("message.key", string(msg.Key)),
+				attribute.String("order.uid", extractOrderUID(msg.Value)),
+				attribute.Int("kafka.partition", msg.Partition),
+				attribute.Int64("kafka.offset", msg.Offset),
+				attribute.Int("message.number", inMsgCounter),
+			),
+		)
+
+		// заворачиваем сообщение и контекст в структуру
+		wrappedMsg := &MessageWithTrace{
+			Message: &msg,
+			Ctx:     msgCtx,
+			Span:    span,
+		}
+
+		inMsgCounter++ // добавляем входящий счётчик
+		// отправляем обёртку в канал (сам span завершаем позже в processBatchResponse)
+		messagesCh <- wrappedMsg
+		outMsgCounter++ // добавляем исходящий счётчик
 
 		if inMsgCounter%10000 == 0 {
 			log.Printf("readMsgOfKafka: получено %d сообщений, отправлено на батчирование %d сообщений, за %v с.\n",
@@ -708,10 +775,59 @@ func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responsesCh 
 		batchApiAnswer, msgApiAnswer, msgInDLQ, time.Since(start).Seconds())
 }
 
+// initTracing инициализирует трейсинг
+func initTracing() (*sdktrace.TracerProvider, error) {
+
+	ctx := context.Background()
+
+	traceExporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithEndpoint("jaeger:4317"), otlptracegrpc.WithInsecure())
+	if err != nil {
+		return nil, fmt.Errorf("не удалось создать экспортер OTLP: %w", err)
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(traceExporter),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceName("consumer"),
+			semconv.ServiceVersion("1.0.0"),
+		)),
+	)
+
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+
+	log.Println("Трейсинг инициализирован (OTLP/gRPC -> Jaeger).")
+	return tp, nil
+}
+
 func main() {
 
 	// считываем конфигурацию
 	cfg = readConfig()
+
+	// инициализируем трейсинг
+	var tp *sdktrace.TracerProvider
+	var err error
+
+	tp, err = initTracing()
+	if err != nil {
+		log.Printf("Не удалось инициализировать трейсинг: %v. Работаем без него.\n", err)
+		// создаем noop-трейсер для работы без трассировки
+		tracer = noop.NewTracerProvider().Tracer("noop-consumer")
+	} else {
+		defer func() {
+			if err := tp.Shutdown(context.Background()); err != nil {
+				log.Printf("Ошибка при остановке провайдера трейсов: %v.\n", err)
+			}
+		}()
+		// получаем реальный трейсер из провайдера
+		tracer = tp.Tracer("consumer")
+	}
 
 	// контекст для отмены работы консумера
 	ctx, cancel := context.WithCancel(context.Background())
@@ -739,7 +855,7 @@ func main() {
 
 	// ждём получения ошибки или nil из логики конвейера
 	// ошибки: нет возможности читать сообщения из брокера или нет возможности заполнять DLQ
-	err := <-errCh
+	err = <-errCh
 	if err != nil {
 		log.Printf("консумер завершился с критической ошибкой: %v", err)
 		cancel()
