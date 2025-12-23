@@ -1,0 +1,39 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'wb-l0'
+
+scrape_configs:
+  # Продюсер (будет на порту 8888)
+  - job_name: 'producer'
+    static_configs:
+      - targets: ['producer:8888']
+    scrape_interval: 5s
+    metrics_path: '/metrics'
+
+  # Консьюмер (будет на порту 8889)
+  - job_name: 'consumer'
+    static_configs:
+      - targets: ['consumer:8889']
+    scrape_interval: 5s
+    metrics_path: '/metrics'
+
+  # Сервисы (через nginx или напрямую)
+  - job_name: 'service'
+    static_configs:
+      - targets: ['service1:8890', 'service2:8890', 'service3:8890', 'service4:8890', 'service5:8890']
+    scrape_interval: 5s
+    metrics_path: '/metrics'
+
+  # Nginx (опционально)
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx:9113']
+    scrape_interval: 10s
+
+  # Redis (опционально)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:9121']
+    scrape_interval: 10s

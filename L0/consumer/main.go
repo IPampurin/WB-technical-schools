@@ -780,11 +780,13 @@ func initTracing() (*sdktrace.TracerProvider, error) {
 
 	ctx := context.Background()
 
+	// экспорт трейсов в jaeger через otlp/grpc
 	traceExporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithEndpoint("jaeger:4317"), otlptracegrpc.WithInsecure())
 	if err != nil {
-		return nil, fmt.Errorf("не удалось создать экспортер OTLP: %w", err)
+		return nil, fmt.Errorf("не удалось создать экспортер трейсов: %w.\n", err)
 	}
 
+	// создаем провайдер трейсов
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(traceExporter),
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
@@ -795,13 +797,14 @@ func initTracing() (*sdktrace.TracerProvider, error) {
 		)),
 	)
 
+	// устанавливаем глобальный провайдер
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
 		propagation.Baggage{},
 	))
 
-	log.Println("Трейсинг инициализирован (OTLP/gRPC -> Jaeger).")
+	log.Println("Трейсинг консумера инициализирован (jaeger:4317).")
 	return tp, nil
 }
 
