@@ -8,7 +8,7 @@ scrape_configs:
   # Продюсер (будет на порту 8888)
   - job_name: 'producer'
     static_configs:
-      - targets: ['producer:8888']
+      - targets: ['producer:8888']    # Имя контейнера из docker
     scrape_interval: 5s
     metrics_path: '/metrics'
 
@@ -22,7 +22,7 @@ scrape_configs:
   # Сервисы (через nginx или напрямую)
   - job_name: 'service'
     static_configs:
-      - targets: ['service1:8890', 'service2:8890', 'service3:8890', 'service4:8890', 'service5:8890']
+      - targets: ['nginx:8081', 'service2:8890', 'service3:8890', 'service4:8890', 'service5:8890']
     scrape_interval: 5s
     metrics_path: '/metrics'
 
