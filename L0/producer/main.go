@@ -81,27 +81,11 @@ func initTracing() (*sdktrace.TracerProvider, error) {
 	return tp, nil
 }
 
-// прометеус метрики для продюсера
+// прометеус метрики для продюсера rate(producer_messages_sent_total[30s]) и producer_messages_sent_total
 var (
-	messagesGenerated = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "producer_messages_generated_total",
-		Help: "Количество сгенерированных сообщений",
-	})
-
 	messagesSent = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "producer_messages_sent_total",
 		Help: "Количество успешно отправленных сообщений",
-	})
-
-	sendErrors = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "producer_messages_errors_total",
-		Help: "Количество ошибок при отправке",
-	})
-
-	generateDuration = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "producer_generate_duration_seconds",
-		Help:    "Время генерации сообщений в секундах",
-		Buckets: prometheus.DefBuckets, // стандартные бакеты: .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10
 	})
 )
 
@@ -214,7 +198,6 @@ func sendMessages(ctx context.Context, w *kafka.Writer, generatedCount, countSen
 			if err != nil {
 				atomic.AddInt64(failedCount, 1)
 				// записываем метрику ошибки
-				sendErrors.Inc()
 				msgSpan.SetStatus(codes.Error, err.Error())
 				msgSpan.SetAttributes(attribute.String("error", err.Error()))
 			} else {
@@ -335,7 +318,7 @@ func main() {
 			Addr:         kafka.TCP(fmt.Sprintf("%s:%d", cfg.KafkaHost, cfg.KafkaPort)), // список брокеров
 			Topic:        cfg.Topic,                                                     // имя топика, в который будем слать сообщения
 			Async:        false,                                                         // можно установить true и получить максимальную скорость без гарантии доставки
-			RequiredAcks: kafka.RequireAll,                                              // максимальный контроль доставки (подтверждение от всех реплик)
+			RequiredAcks: kafka.RequireAll,                                              // максимальный контроль доставки (подтверждение от всех реплик, если бы они были)
 		}
 		defer func() {
 			if err := writers[i].Close(); err != nil {
@@ -389,6 +372,8 @@ func main() {
 
 	log.Printf("Сгенерировано сообщений: %d. Отправлено брокеру сообщений: %d. Ошибок при отправке: %d. Время работы: %v c.\n",
 		generatedCount, countSended, failedCount, time.Since(start).Seconds())
+
+	time.Sleep(7 * time.Second) // дожидаемся крайнего скрейпа Prometheus чтоб цифры сходились
 }
 
 // Заказ
@@ -509,8 +494,6 @@ func createItem() Item {
 // messageGenerate организует псевдослучайные данные для передачи брокеру
 func messageGenerate(count int) [][]byte {
 
-	start := time.Now()
-
 	// создаем span для генерации батча сообщений
 	ctx, span := tracer.Start(context.Background(), "producer.generate.batch",
 		trace.WithAttributes(
@@ -564,15 +547,8 @@ func messageGenerate(count int) [][]byte {
 
 		testMsg[i] = orderInByte
 
-		// записываем метрику: одно сообщение сгенерировано
-		messagesGenerated.Inc()
-
 		msgSpan.End()
 	}
-
-	// записываем метрику времени генерации батча
-	duration := time.Since(start).Seconds()
-	generateDuration.Observe(duration)
 
 	span.SetAttributes(attribute.Int("generated.count", len(testMsg)))
 
