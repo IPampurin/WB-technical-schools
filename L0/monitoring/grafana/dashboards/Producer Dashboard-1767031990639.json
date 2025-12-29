@@ -18,13 +18,13 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 5,
+  "id": 1,
   "links": [],
   "panels": [
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "cf8k2zgak8z5se"
+        "uid": "PBFA97CFB590B2093"
       },
       "fieldConfig": {
         "defaults": {
@@ -116,12 +116,13 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "rate(producer_messages_sent_total[30s])",
+          "expr": "rate(producer_messages_sent_total[5s])",
           "format": "time_series",
           "hide": false,
           "instant": false,
-          "interval": "",
+          "interval": "10s",
           "legendFormat": "__auto",
+          "maxDataPoints": 1000,
           "range": true,
           "refId": "RPS продюсера"
         }
@@ -132,7 +133,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "cf8k2zgak8z5se"
+        "uid": "PBFA97CFB590B2093"
       },
       "fieldConfig": {
         "defaults": {
@@ -175,7 +176,7 @@
         "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
-            "lastNotNull"
+            "max"
           ],
           "fields": "",
           "values": false
@@ -195,7 +196,9 @@
           "expr": "producer_messages_sent_total",
           "hide": false,
           "instant": false,
+          "interval": "10s",
           "legendFormat": "__auto",
+          "maxDataPoints": 1000,
           "range": true,
           "refId": "Всего отправлено"
         }
