@@ -78,7 +78,7 @@ var (
 	consumerStageMessages = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "consumer_stage_messages_total",
 		Help: "Количество сообщений на каждом этапе конвейера",
-	}, []string{"stage"}) // stage: read, batched, prepared, sent, processed
+	}, []string{"stage"}) // stage: read, batched, prepared, sent, processed, dlq
 
 	// для времени ответа API
 	consumerApiResponseTime = promauto.NewHistogram(prometheus.HistogramOpts{
@@ -87,7 +87,7 @@ var (
 		Buckets: []float64{0.01, 0.05, 0.1, 0.5, 1, 2, 5},
 	})
 
-	// для lag консумера
+	// для lag консумера (гистограмма для среднего/макс)
 	consumerLagHistogram = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "consumer_lag_seconds",
 		Help:    "Задержка обработки сообщений",
@@ -117,9 +117,9 @@ const (
 
 // PrepareBatch структура для параллельной отправки ограниченного величиной COUNT_CLIENT количества батчей в api
 type PrepareBatch struct {
-	batchMessage     []json.RawMessage         // указатели на подготовленные к отправке в api сообщения
-	messageByUID     map[string]*kafka.Message // мапа идентификации [orderUID]kafka.Message
-	lastBatchMessage *kafka.Message            // указатель на последнее сообщение в батче, чтобы коммитить весь батч, так как порядок сообщений в батче сохраняется
+	batchMessage     []json.RawMessage            // указатели на подготовленные к отправке в api сообщения
+	messageByUID     map[string]*MessageWithTrace // мапа идентификации [orderUID]->MessageWithTrace
+	lastBatchMessage *kafka.Message               // указатель на последнее сообщение в батче, чтобы коммитить весь батч, так как порядок сообщений в батче сохраняется
 }
 
 // OrderResponse структура для ответов из api (копия из postOrder.go)
@@ -131,9 +131,9 @@ type OrderResponse struct {
 
 // RespBatchInfo объединяет информацию об ответах api по сообщениям с самими сообщениями
 type RespBatchInfo struct {
-	respOfBatch      []OrderResponse           // ответы по каждому из сообщений батча
-	messageByUID     map[string]*kafka.Message // мапа идентификации [orderUID]kafka.Message
-	lastBatchMessage *kafka.Message            // указатель на последнее сообщение в батче, чтобы коммитить весь батч, так как порядок сообщений в батче сохраняется
+	respOfBatch      []OrderResponse              // ответы по каждому из сообщений батча
+	messageByUID     map[string]*MessageWithTrace // мапа идентификации [orderUID]->MessageWithTrace
+	lastBatchMessage *kafka.Message               // указатель на последнее сообщение в батче, чтобы коммитить весь батч, так как порядок сообщений в батче сохраняется
 }
 
 // MessageWithTrace оборачивает kafka.Message вместе с его контекстом трейсинга для передачи trace через этапы пайплайна
@@ -320,10 +320,11 @@ func extractTraceFromHeaders(ctx context.Context, headers []kafka.Header) contex
 	for _, h := range headers {
 		if h.Key == "traceparent" {
 			carrier.Set("traceparent", string(h.Value))
+			break
 		}
 	}
 
-	if len(carrier) > 0 {
+	if carrier.Get("traceparent") != "" {
 		return otel.GetTextMapPropagator().Extract(ctx, carrier)
 	}
 
@@ -368,20 +369,20 @@ func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messagesCh chan<- *Mes
 			return
 		}
 
+		// извлекаем трейс из заголовков
 		msgCtx := extractTraceFromHeaders(ctx, msg.Headers)
 
-		// создаем span для конкретного сообщения,
+		// создаем span для этапа "чтение из Kafka" для конкретного сообщения,
 		// он будет дочерним для span из функции consumer
-		msgCtx, span := tracer.Start(msgCtx, "kafka.consume.message",
+		msgCtx, span := tracer.Start(msgCtx, "consumer.pipeline.stage",
 			trace.WithAttributes(
+				attribute.String("stage", "kafka_read"),
 				attribute.String("message.key", string(msg.Key)),
 				attribute.String("order.uid", extractOrderUID(msg.Value)),
 				attribute.Int("kafka.partition", msg.Partition),
 				attribute.Int64("kafka.offset", msg.Offset),
 				attribute.Int("message.number", inMsgCounter),
-				attribute.String("stage", "kafka_read"),
-			),
-		)
+			))
 
 		// считаем lag для мониторинга
 		if !msg.Time.IsZero() {
@@ -389,11 +390,15 @@ func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messagesCh chan<- *Mes
 			consumerLagHistogram.Observe(lag)
 		}
 
+		// метрика RPS для этапа
+		consumerStageMessages.WithLabelValues("read").Inc()
+
 		// заворачиваем сообщение и контекст в структуру
 		wrappedMsg := &MessageWithTrace{
-			Message: &msg,
-			Ctx:     msgCtx,
-			Span:    span,
+			Message:   &msg,
+			Ctx:       msgCtx,
+			Span:      span,
+			StartTime: time.Now(), // фиксируем время начала обработки
 		}
 
 		inMsgCounter++ // добавляем входящий счётчик
@@ -410,7 +415,7 @@ func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messagesCh chan<- *Mes
 
 // complectBatches собирает батчи из сообщений из messagesCh (по количеству или по времени) и наполняет канал batches,
 // контекст не используем в надежде обработать все уже поступившие в канал messagesCh сообщения
-func complectBatches(messagesCh <-chan *kafka.Message, batchesCh chan<- []*kafka.Message, wgPipe *sync.WaitGroup) {
+func complectBatches(messagesCh <-chan *MessageWithTrace, batchesCh chan<- []*MessageWithTrace, wgPipe *sync.WaitGroup) {
 
 	defer wgPipe.Done()
 
@@ -423,8 +428,8 @@ func complectBatches(messagesCh <-chan *kafka.Message, batchesCh chan<- []*kafka
 
 	start := time.Now()
 
-	currentBatch := make([]*kafka.Message, 0, cfg.BatchSize) // батч с указателями на сообщения
-	ticker := time.NewTicker(cfg.BatchTimeout)               // таймер для отключения комплектования батча по времени
+	currentBatch := make([]*MessageWithTrace, 0, cfg.BatchSize) // батч с указателями на сообщения в обёртке мониторинга
+	ticker := time.NewTicker(cfg.BatchTimeout)                  // таймер для отключения комплектования батча по времени
 	defer ticker.Stop()
 
 	inMsgCounter := 0    // счётчик входящих сообщений
@@ -432,9 +437,15 @@ func complectBatches(messagesCh <-chan *kafka.Message, batchesCh chan<- []*kafka
 	outBatchCounter := 0 // счётчик количества отправленных батчей
 
 	sendBatch := func() {
-		copyBatch := make([]*kafka.Message, len(currentBatch))
+		// создаем копию батча
+		copyBatch := make([]*MessageWithTrace, len(currentBatch))
 		copy(copyBatch, currentBatch)
+		// отправляем батч в канал
 		batchesCh <- copyBatch
+		// метрика: сообщения на этапе batched
+		consumerStageMessages.WithLabelValues("batched").Add(float64(len(copyBatch)))
+
+		// очищаем память и плюсуем счетчики
 		currentBatch = currentBatch[:0:cfg.BatchSize]
 		outMsgCounter += len(copyBatch)
 		outBatchCounter++
@@ -458,7 +469,19 @@ func complectBatches(messagesCh <-chan *kafka.Message, batchesCh chan<- []*kafka
 					inMsgCounter, outMsgCounter, outBatchCounter, time.Since(start).Seconds())
 				return
 			}
-			inMsgCounter++                           // добавляем входящий счётчик
+			inMsgCounter++ // добавляем входящий счётчик
+
+			// создаем span для этапа батчирования этого сообщения
+			batchCtx, _ := tracer.Start(msg.Ctx, "consumer.pipeline.stage",
+				trace.WithAttributes(
+					attribute.String("stage", "batching"),
+					attribute.Int("batch.current_size", len(currentBatch)+1),
+					attribute.Int("message.index_in_batch", len(currentBatch)),
+				))
+
+			// обновляем контекст сообщения
+			msg.Ctx = batchCtx
+
 			currentBatch = append(currentBatch, msg) // дополняем батч
 			// если достигли нужного размера сразу отправляем
 			if len(currentBatch) >= cfg.BatchSize {
@@ -474,7 +497,7 @@ func complectBatches(messagesCh <-chan *kafka.Message, batchesCh chan<- []*kafka
 }
 
 // prepareBatchToSending подготавливает информацию по батчу к отправке в api
-func prepareBatchToSending(dlqWriter *kafka.Writer, batchesCh <-chan []*kafka.Message, preparesCh chan<- *PrepareBatch, wgPipe *sync.WaitGroup) {
+func prepareBatchToSending(dlqWriter *kafka.Writer, batchesCh <-chan []*MessageWithTrace, preparesCh chan<- *PrepareBatch, wgPipe *sync.WaitGroup) {
 
 	defer wgPipe.Done()
 
@@ -505,26 +528,41 @@ func prepareBatchToSending(dlqWriter *kafka.Writer, batchesCh <-chan []*kafka.Me
 		inMsgCounter += len(batch) // подсчитываем пришедшие сообщения
 
 		// подготавливаем данные для API
-		jsonMessages := make([]json.RawMessage, 0, len(batch))    // "тела" сообщений
-		messageMap := make(map[string]*kafka.Message, len(batch)) // мапа идентификации [orderUID]->*message
+		jsonMessages := make([]json.RawMessage, 0, len(batch))       // "тела" сообщений
+		messageMap := make(map[string]*MessageWithTrace, len(batch)) // мапа идентификации [orderUID]->*MessageWithTrace
 
 		for i := range batch {
+
+			// создаем span для этапа подготовки этого сообщения
+			prepareCtx, _ := tracer.Start(batch[i].Ctx, "consumer.pipeline.stage",
+				trace.WithAttributes(
+					attribute.String("stage", "preparing"),
+					attribute.Int("batch_index", inBatchCounter),
+					attribute.Int("message_index_in_batch", i),
+				))
+
+			// обновляем контекст сообщения
+			batch[i].Ctx = prepareCtx
+
 			// извлекаем orderUID для маппинга
-			if orderUID := extractOrderUID(batch[i].Value); orderUID != "" {
+			if orderUID := extractOrderUID(batch[i].Message.Value); orderUID != "" {
 				messageMap[orderUID] = batch[i]
-				jsonMessages = append(jsonMessages, batch[i].Value)
+				jsonMessages = append(jsonMessages, batch[i].Message.Value)
 			} else {
 				// при отсутствии идентификатора сообщение шлём в DLQ
 				msgInDLQ++
-				sendToDLQ(dlqWriter, batch[i], "not exist OrderUID")
+				sendToDLQ(dlqWriter, batch[i].Message, "not exist OrderUID")
 			}
 		}
+
+		// метрика для этапа подготовки
+		consumerStageMessages.WithLabelValues("prepared").Add(float64(len(jsonMessages)))
 
 		// результат подготовки упаковываем в структуру
 		prepareBatch := &PrepareBatch{
 			batchMessage:     jsonMessages,
 			messageByUID:     messageMap,
-			lastBatchMessage: batch[len(batch)-1],
+			lastBatchMessage: batch[len(batch)-1].Message,
 		}
 
 		preparesCh <- prepareBatch // отправляем пакет с данными
@@ -613,6 +651,10 @@ func batchPrepareCollect(dlqWriter *kafka.Writer, preparesCh <-chan *PrepareBatc
 		copyBatch := make([]*PrepareBatch, len(currentCollect))
 		copy(copyBatch, currentCollect)
 		collectCh <- copyBatch
+
+		// метрика для этапа сбора
+		consumerStageMessages.WithLabelValues("collected").Add(float64(len(currentCollect)))
+
 		currentCollect = currentCollect[:0:cfg.CountClient]
 		outBatchInfoCounter += len(copyBatch)
 		outCollectCounter++
@@ -639,6 +681,18 @@ func batchPrepareCollect(dlqWriter *kafka.Writer, preparesCh <-chan *PrepareBatc
 
 			inBatchInfoCounter++
 			inMsgCounter += len(prepareBatch.batchMessage)
+
+			// создаем span для этапа сбора для каждого сообщения в батче
+			for _, wrappedMsg := range prepareBatch.messageByUID {
+				if wrappedMsg != nil { // проверка на случай нахождения сообщения в dlq
+					collectCtx, _ := tracer.Start(wrappedMsg.Ctx, "consumer.pipeline.stage",
+						trace.WithAttributes(
+							attribute.String("stage", "collecting"),
+							attribute.Int("collect_group_size", len(currentCollect)+1),
+						))
+					wrappedMsg.Ctx = collectCtx
+				}
+			}
 
 			currentCollect = append(currentCollect, prepareBatch) // дополняем группу
 			// если достигли нужного размера сразу отправляем
@@ -702,14 +756,29 @@ func sendBatchInfo(dlqWriter *kafka.Writer, collectCh <-chan []*PrepareBatch, re
 				atomic.AddInt64(&batchInfoCounter, 1)
 				atomic.AddInt64(&counterMsg, int64(len(packInfo[i].batchMessage)))
 
+				// Создаем spans для этапа отправки для каждого сообщения
+				for _, wrappedMsg := range packInfo[i].messageByUID {
+					if wrappedMsg != nil {
+						sendCtx, _ := tracer.Start(wrappedMsg.Ctx, "consumer.pipeline.stage",
+							trace.WithAttributes(
+								attribute.String("stage", "sending"),
+								attribute.String("api.url", apiURL),
+							))
+						wrappedMsg.Ctx = sendCtx
+					}
+				}
+
+				// метрика для этапа отправки
+				consumerStageMessages.WithLabelValues("sent").Add(float64(len(packInfo[i].batchMessage)))
+
 				// формируем тело запроса
 				requestBody, err := json.Marshal(packInfo[i].batchMessage)
 				if err != nil {
 					log.Printf("ошибка сериализации: %v\n", err)
 					// если не можем сформировать запрос на основании данных по батчу, отправляем сообщения батча в DLQ
-					for _, value := range packInfo[i].messageByUID {
+					for _, wrappedMsg := range packInfo[i].messageByUID {
 						atomic.AddInt64(&msgInDLQ, 1)
-						sendToDLQ(dlqWriter, value, err.Error())
+						sendToDLQ(dlqWriter, wrappedMsg.Message, err.Error())
 					}
 					return
 				}
@@ -717,8 +786,17 @@ func sendBatchInfo(dlqWriter *kafka.Writer, collectCh <-chan []*PrepareBatch, re
 				// с повторами отправляем батч в api
 				for attempt := 1; attempt <= cfg.MaxRetries; attempt++ {
 
+					requestStart := time.Now() // засекаем время
+
 					// направляем запрос
 					resp, err := client.Post(apiURL, "application/json", bytes.NewReader(requestBody))
+
+					// метрика времени ответа API
+					if err == nil && resp != nil {
+						duration := time.Since(requestStart).Seconds()
+						consumerApiResponseTime.Observe(duration)
+					}
+
 					if err != nil {
 						log.Printf("Ошибка сети (попытка %d/%d): %v", attempt, cfg.MaxRetries, err)
 
@@ -745,9 +823,9 @@ func sendBatchInfo(dlqWriter *kafka.Writer, collectCh <-chan []*PrepareBatch, re
 						var responsInfo []OrderResponse
 						if err := json.Unmarshal(body, &responsInfo); err != nil {
 							// если ответ не парсится => батч в DLQ
-							for _, value := range packInfo[i].messageByUID {
+							for _, wrappedMsg := range packInfo[i].messageByUID {
 								atomic.AddInt64(&msgInDLQ, 1)
-								sendToDLQ(dlqWriter, value, err.Error())
+								sendToDLQ(dlqWriter, wrappedMsg.Message, err.Error())
 							}
 							log.Println("sendBatchInfo: от api получен неожиданный ответ - батч направлен в DLQ.")
 							return
@@ -757,7 +835,7 @@ func sendBatchInfo(dlqWriter *kafka.Writer, collectCh <-chan []*PrepareBatch, re
 						atomic.AddInt64(&inRespCounter, 1)
 						atomic.AddInt64(&inRespMsgCounter, int64(len(responsInfo)))
 
-						// объединяем ответ по батчу и мапу [orderUID]->message в структуру
+						// объединяем ответ по батчу и мапу [orderUID]->MessageWithTrace в структуру
 						// и шлём в канал для обработки в processBatchResponse
 						respBatchInfo := &RespBatchInfo{
 							respOfBatch:      responsInfo,
@@ -780,9 +858,9 @@ func sendBatchInfo(dlqWriter *kafka.Writer, collectCh <-chan []*PrepareBatch, re
 				}
 
 				// если за повторы не получилось отправить запрос в api, то отправляем всё в DLQ
-				for _, value := range packInfo[i].messageByUID {
+				for _, wrappedMsg := range packInfo[i].messageByUID {
 					atomic.AddInt64(&msgInDLQ, 1)
-					sendToDLQ(dlqWriter, value, err.Error())
+					sendToDLQ(dlqWriter, wrappedMsg.Message, err.Error())
 				}
 			}()
 		}
@@ -817,6 +895,7 @@ func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responsesCh 
 
 		batchApiAnswer++
 		msgApiAnswer += len(batchInfo.respOfBatch)
+
 		if msgApiAnswer%10000 == 0 {
 			log.Printf("processBatchResponse: от api поступило ответов %d для %d сообщений, отправлено в DLQ: %d, за %v c.\n",
 				batchApiAnswer, msgApiAnswer, msgInDLQ, time.Since(start).Seconds())
@@ -826,18 +905,33 @@ func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responsesCh 
 		// сообщение в мапе и можно ли его закоммитить
 		for _, resp := range batchInfo.respOfBatch {
 
-			msg, ok := batchInfo.messageByUID[resp.OrderUID]
+			wrappedMsg, ok := batchInfo.messageByUID[resp.OrderUID]
 			if !ok {
 				// не смотря на такое невероятное стечение обстоятельств, чтобы не останавливать конвейер, логируем и продолжаем
 				log.Printf("processBatchResponse: в мапе заказов не оказалось сообщения с OrderUID = %s !!!\n", resp.OrderUID)
 				continue
 			}
 
+			// создаем span для этапа обработки ответа
+			_, processSpan := tracer.Start(wrappedMsg.Ctx, "consumer.pipeline.stage",
+				trace.WithAttributes(
+					attribute.String("stage", "processing"),
+					attribute.String("api.response.status", resp.Status),
+				))
+
 			// в DLQ отправляем не только явные ошибки, но и дубликаты сообщений (для выявления возможных причин появления)
 			if resp.Status == "badRequest" || resp.Status == "error" || resp.Status == "conflict" {
-				sendToDLQ(dlqWriter, msg, resp.Message)
+				sendToDLQ(dlqWriter, wrappedMsg.Message, resp.Message)
 				msgInDLQ++
 			}
+
+			// метрика для успешно обработанных
+			consumerStageMessages.WithLabelValues("processed").Inc()
+
+			processSpan.End()
+
+			// завершаем основной span сообщения (завершатся все дочерние spans)
+			wrappedMsg.Span.End()
 		}
 
 		// коммитим один раз весь батч по последнему сообщению в батче
