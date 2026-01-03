@@ -19,6 +19,7 @@ import (
 
 	"github.com/segmentio/kafka-go"
 
+	// для трейсинга
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -28,29 +29,73 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
+
+	// для Prometheus метрик
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// трейсер
+// провайдер трейсов для продюсера
 var tracer trace.Tracer
 
-/*
-трейсинг
-1. Trace одного сообщения через все 6 этапов
-2. Trace обработки батча как единого целого
-3. Trace ретраев к API с детализацией по попыткам
-4. Trace коммитов и DLQ для отладки проблем
+// initTracing - инициализация трейсинга
+func initTracing() (*sdktrace.TracerProvider, error) {
 
-метрики (http://localhost:9090/metrics для Grafana)
-1. RPS всего пайплайна по этапам
-2. Время каждого этапа (гистограммы)
-3. Использование памяти в реальном времени
-4. Время ответа API с распределением
-5. Lag консумера для мониторинга отставания
-+
-6. Заполненность каналов (узкие места)
-7. Статусы ответов API (качество интеграции)
-8. Количество ретраев (устойчивость)
-*/
+	ctx := context.Background()
+
+	// экспорт трейсов в jaeger через otlp/grpc
+	traceExporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithEndpoint("jaeger:4317"), otlptracegrpc.WithInsecure())
+	if err != nil {
+		return nil, fmt.Errorf("не удалось создать экспортер трейсов: %w.\n", err)
+	}
+
+	// создаем провайдер трейсов
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(traceExporter),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceName("consumer"),
+			semconv.ServiceVersion("1.0.0"),
+		)),
+	)
+
+	// устанавливаем глобальный провайдер
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+
+	log.Println("Трейсинг консумера инициализирован (jaeger:4317).")
+	return tp, nil
+}
+
+// прометеус метрики для консумера
+var (
+	// для RPS по этапам - считаем сообщения на каждом этапе
+	consumerStageMessages = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "consumer_stage_messages_total",
+		Help: "Количество сообщений на каждом этапе конвейера",
+	}, []string{"stage"}) // stage: read, batched, prepared, sent, processed
+
+	// для времени ответа API
+	consumerApiResponseTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "consumer_api_response_duration_seconds",
+		Help:    "Время ответа API на батч запросов",
+		Buckets: []float64{0.01, 0.05, 0.1, 0.5, 1, 2, 5},
+	})
+
+	// для lag консумера
+	consumerLagHistogram = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "consumer_lag_seconds",
+		Help:    "Задержка обработки сообщений",
+		Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60},
+	})
+	// Среднее: avg(rate(consumer_lag_seconds_sum[5m])) / avg(rate(consumer_lag_seconds_count[5m]))
+	// Максимальное: max_over_time(histogram_quantile(0.99, rate(consumer_lag_seconds_bucket[5m]))[5m:1m])
+)
 
 // выносим константы конфигурации по умолчанию, чтобы были на виду.
 // для работы программы менять в .env
@@ -93,9 +138,10 @@ type RespBatchInfo struct {
 
 // MessageWithTrace оборачивает kafka.Message вместе с его контекстом трейсинга для передачи trace через этапы пайплайна
 type MessageWithTrace struct {
-	Message *kafka.Message  // само сообщение
-	Ctx     context.Context // контекст, содержащий span этого сообщения
-	Span    trace.Span      // сам span сообщения
+	Message   *kafka.Message  // само сообщение
+	Ctx       context.Context // контекст, содержащий span этого сообщения
+	Span      trace.Span      // сам span сообщения
+	StartTime time.Time       // для метрики времени обработки
 }
 
 // ConsumerConfig описывает настройки с учётом переменных окружения
@@ -263,6 +309,27 @@ func consumer(ctx context.Context, errCh chan<- error, endCh chan struct{}) {
 	// close(endCh) уже выполнился при выходе из processBatchResponse
 }
 
+// extractTraceFromHeaders извлекает контекст трейсинга из заголовков Kafka
+func extractTraceFromHeaders(ctx context.Context, headers []kafka.Header) context.Context {
+
+	if len(headers) == 0 {
+		return ctx
+	}
+
+	carrier := propagation.HeaderCarrier{}
+	for _, h := range headers {
+		if h.Key == "traceparent" {
+			carrier.Set("traceparent", string(h.Value))
+		}
+	}
+
+	if len(carrier) > 0 {
+		return otel.GetTextMapPropagator().Extract(ctx, carrier)
+	}
+
+	return ctx
+}
+
 // readMsgOfKafka читает сообщения из кафки и наполняет канал messagesCh
 func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messagesCh chan<- *MessageWithTrace, errCh chan<- error, wgPipe *sync.WaitGroup) {
 
@@ -301,17 +368,26 @@ func readMsgOfKafka(ctx context.Context, r *kafka.Reader, messagesCh chan<- *Mes
 			return
 		}
 
+		msgCtx := extractTraceFromHeaders(ctx, msg.Headers)
+
 		// создаем span для конкретного сообщения,
 		// он будет дочерним для span из функции consumer
-		msgCtx, span := tracer.Start(ctx, "kafka.consume.message",
+		msgCtx, span := tracer.Start(msgCtx, "kafka.consume.message",
 			trace.WithAttributes(
 				attribute.String("message.key", string(msg.Key)),
 				attribute.String("order.uid", extractOrderUID(msg.Value)),
 				attribute.Int("kafka.partition", msg.Partition),
 				attribute.Int64("kafka.offset", msg.Offset),
 				attribute.Int("message.number", inMsgCounter),
+				attribute.String("stage", "kafka_read"),
 			),
 		)
+
+		// считаем lag для мониторинга
+		if !msg.Time.IsZero() {
+			lag := time.Since(msg.Time).Seconds()
+			consumerLagHistogram.Observe(lag)
+		}
 
 		// заворачиваем сообщение и контекст в структуру
 		wrappedMsg := &MessageWithTrace{
@@ -775,43 +851,17 @@ func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responsesCh 
 		batchApiAnswer, msgApiAnswer, msgInDLQ, time.Since(start).Seconds())
 }
 
-// initTracing инициализирует трейсинг
-func initTracing() (*sdktrace.TracerProvider, error) {
-
-	ctx := context.Background()
-
-	// экспорт трейсов в jaeger через otlp/grpc
-	traceExporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithEndpoint("jaeger:4317"), otlptracegrpc.WithInsecure())
-	if err != nil {
-		return nil, fmt.Errorf("не удалось создать экспортер трейсов: %w.\n", err)
-	}
-
-	// создаем провайдер трейсов
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(traceExporter),
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-		sdktrace.WithResource(resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceName("consumer"),
-			semconv.ServiceVersion("1.0.0"),
-		)),
-	)
-
-	// устанавливаем глобальный провайдер
-	otel.SetTracerProvider(tp)
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
-
-	log.Println("Трейсинг консумера инициализирован (jaeger:4317).")
-	return tp, nil
-}
-
 func main() {
 
-	// считываем конфигурацию
-	cfg = readConfig()
+	// запускаем сервер для метрик
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		port := ":8888"
+		log.Printf("Prometheus метрики доступны на http://localhost%s/metrics\n", port)
+		if err := http.ListenAndServe(port, nil); err != nil && err != http.ErrServerClosed {
+			log.Printf("Ошибка запуска сервера метрик: %v.\n", err)
+		}
+	}()
 
 	// инициализируем трейсинг
 	var tp *sdktrace.TracerProvider
@@ -831,6 +881,9 @@ func main() {
 		// получаем реальный трейсер из провайдера
 		tracer = tp.Tracer("consumer")
 	}
+
+	// считываем конфигурацию
+	cfg = readConfig()
 
 	// контекст для отмены работы консумера
 	ctx, cancel := context.WithCancel(context.Background())
