@@ -12,7 +12,7 @@ scrape_configs:
     scrape_interval: 1s
     metrics_path: '/metrics'
 
-  # Консьюмер (будет на порту 8889)
+  # Консумер (будет на порту 8889)
   - job_name: 'consumer'
     static_configs:
       - targets: ['consumer:8889']

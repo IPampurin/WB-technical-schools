@@ -950,7 +950,7 @@ func main() {
 	// запускаем сервер для метрик
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
-		port := ":8888"
+		port := ":8889"
 		log.Printf("Prometheus метрики доступны на http://localhost%s/metrics\n", port)
 		if err := http.ListenAndServe(port, nil); err != nil && err != http.ErrServerClosed {
 			log.Printf("Ошибка запуска сервера метрик: %v.\n", err)
