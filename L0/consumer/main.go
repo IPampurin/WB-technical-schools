@@ -925,7 +925,7 @@ func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responsesCh 
 				msgInDLQ++
 			}
 
-			// метрика для успешно обработанных
+			// метрика для обработанных сообщений
 			consumerStageMessages.WithLabelValues("processed").Inc()
 
 			processSpan.End()
