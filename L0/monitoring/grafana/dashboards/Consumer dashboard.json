@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 0,
+  "id": 1,
   "links": [],
   "panels": [
     {
@@ -111,7 +111,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "rate(consumer_stage_messages_total[15s])",
+          "expr": "rate(consumer_stage_messages_total[20s])",
           "legendFormat": "{{stage}}",
           "range": true,
           "refId": "RPS по этапам"
@@ -176,7 +176,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "rate(consumer_stage_messages_total{stage=\"processed\"}[15s])",
+          "expr": "rate(consumer_stage_messages_total{stage=\"processed\"}[5s])",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -429,5 +429,5 @@
   "timezone": "browser",
   "title": "Consumer dashboard",
   "uid": "adjv4tj",
-  "version": 11
+  "version": 1
 }
