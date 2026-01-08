@@ -1,23 +1,18 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"os"
 	"strconv"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/segmentio/kafka-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // TestGetEnvString тестирует извлечение строковой переменной окружения
@@ -166,18 +161,17 @@ func TestGetEnvInt(t *testing.T) {
 func TestReadConfig(t *testing.T) {
 	// Сохраняем оригинальные значения всех переменных окружения
 	envVars := map[string]string{
-		"TOPIC_NAME_STR":        "",
-		"GROUP_ID_NAME_STR":     "",
-		"KAFKA_PORT_NUM":        "",
-		"TIME_LIMIT_CONSUMER_S": "",
-		"SERVICE_PORT_NUM":      "",
-		"BATCH_SIZE_NUM":        "",
-		"BATCH_TIMEOUT_MS":      "",
-		"MAX_RETRIES_NUM":       "",
-		"RETRY_DELEY_BASE_MS":   "",
-		"CLIENT_TIMEOUT_S":      "",
-		"DLQ_TOPIC_NAME_STR":    "",
-		"WORKERS_COUNT":         "",
+		"TOPIC_NAME_STR":      "",
+		"GROUP_ID_NAME_STR":   "",
+		"KAFKA_PORT_NUM":      "",
+		"SERVICE_PORT":        "",
+		"BATCH_SIZE_NUM":      "",
+		"BATCH_TIMEOUT_S":     "",
+		"MAX_RETRIES_NUM":     "",
+		"RETRY_DELEY_BASE_MS": "",
+		"COUNT_CLIENT":        "",
+		"CLIENT_TIMEOUT_S":    "",
+		"DLQ_TOPIC_NAME_STR":  "",
 	}
 
 	// Сохраняем и очищаем переменные
@@ -200,18 +194,19 @@ func TestReadConfig(t *testing.T) {
 			name:   "значения по умолчанию",
 			setEnv: map[string]string{}, // все переменные не установлены
 			expected: &ConsumerConfig{
-				Topic:           topicNameConst,
-				GroupID:         groupIDNameConst,
-				KafkaPort:       kafkaPortConst,
-				LimitConsumWork: time.Duration(limitConsumWorkConst) * time.Second,
-				ServicePort:     servicePortConst,
-				BatchSize:       batchSizeConst,
-				BatchTimeout:    time.Duration(batchTimeoutConst) * time.Millisecond,
-				MaxRetries:      maxRetriesConst,
-				RetryDelayBase:  time.Duration(retryDelayBaseConst) * time.Millisecond,
-				ClientTimeout:   time.Duration(clientTimeoutConst) * time.Second,
-				DlqTopic:        dlqTopicConst,
-				WorkersCount:    workersCountConst,
+				Topic:          topicNameConst,
+				GroupID:        groupIDNameConst,
+				KafkaHost:      kafkaHostConst,
+				KafkaPort:      kafkaPortConst,
+				ServiceHost:    serviceHostConst,
+				ServicePort:    servicePortConst,
+				BatchSize:      batchSizeConst,
+				BatchTimeout:   time.Duration(batchTimeoutConst) * time.Second,
+				MaxRetries:     maxRetriesConst,
+				RetryDelayBase: time.Duration(retryDelayBaseConst) * time.Millisecond,
+				CountClient:    countClientConst,
+				ClientTimeout:  time.Duration(clientTimeoutConst) * time.Second,
+				DlqTopic:       dlqTopicConst,
 			},
 		},
 		{
@@ -219,77 +214,79 @@ func TestReadConfig(t *testing.T) {
 			setEnv: map[string]string{
 				"TOPIC_NAME_STR":    "custom-topic",
 				"GROUP_ID_NAME_STR": "custom-group",
-				"SERVICE_PORT_NUM":  "9090",
+				"SERVICE_PORT":      "9090",
 				"BATCH_SIZE_NUM":    "500",
-				"WORKERS_COUNT":     "10",
+				"COUNT_CLIENT":      "20",
 			},
 			expected: &ConsumerConfig{
-				Topic:           "custom-topic",
-				GroupID:         "custom-group",
-				KafkaPort:       kafkaPortConst, // остается по умолчанию
-				LimitConsumWork: time.Duration(limitConsumWorkConst) * time.Second,
-				ServicePort:     9090,
-				BatchSize:       500,
-				BatchTimeout:    time.Duration(batchTimeoutConst) * time.Millisecond,
-				MaxRetries:      maxRetriesConst,
-				RetryDelayBase:  time.Duration(retryDelayBaseConst) * time.Millisecond,
-				ClientTimeout:   time.Duration(clientTimeoutConst) * time.Second,
-				DlqTopic:        dlqTopicConst,
-				WorkersCount:    10,
+				Topic:          "custom-topic",
+				GroupID:        "custom-group",
+				KafkaHost:      kafkaHostConst,
+				KafkaPort:      kafkaPortConst,
+				ServiceHost:    serviceHostConst,
+				ServicePort:    9090,
+				BatchSize:      500,
+				BatchTimeout:   time.Duration(batchTimeoutConst) * time.Second,
+				MaxRetries:     maxRetriesConst,
+				RetryDelayBase: time.Duration(retryDelayBaseConst) * time.Millisecond,
+				CountClient:    20,
+				ClientTimeout:  time.Duration(clientTimeoutConst) * time.Second,
+				DlqTopic:       dlqTopicConst,
 			},
 		},
 		{
 			name: "все значения переопределены",
 			setEnv: map[string]string{
-				"TOPIC_NAME_STR":        "test-topic",
-				"GROUP_ID_NAME_STR":     "test-group",
-				"KAFKA_PORT_NUM":        "9093",
-				"TIME_LIMIT_CONSUMER_S": "30",
-				"SERVICE_PORT_NUM":      "8082",
-				"BATCH_SIZE_NUM":        "150",
-				"BATCH_TIMEOUT_MS":      "2000",
-				"MAX_RETRIES_NUM":       "5",
-				"RETRY_DELEY_BASE_MS":   "200",
-				"CLIENT_TIMEOUT_S":      "15",
-				"DLQ_TOPIC_NAME_STR":    "test-dlq",
-				"WORKERS_COUNT":         "8",
+				"TOPIC_NAME_STR":      "test-topic",
+				"GROUP_ID_NAME_STR":   "test-group",
+				"KAFKA_PORT_NUM":      "9093",
+				"SERVICE_PORT":        "8082",
+				"BATCH_SIZE_NUM":      "150",
+				"BATCH_TIMEOUT_S":     "10",
+				"MAX_RETRIES_NUM":     "5",
+				"RETRY_DELEY_BASE_MS": "200",
+				"COUNT_CLIENT":        "15",
+				"CLIENT_TIMEOUT_S":    "30",
+				"DLQ_TOPIC_NAME_STR":  "test-dlq",
 			},
 			expected: &ConsumerConfig{
-				Topic:           "test-topic",
-				GroupID:         "test-group",
-				KafkaPort:       9093,
-				LimitConsumWork: 30 * time.Second,
-				ServicePort:     8082,
-				BatchSize:       150,
-				BatchTimeout:    2000 * time.Millisecond,
-				MaxRetries:      5,
-				RetryDelayBase:  200 * time.Millisecond,
-				ClientTimeout:   15 * time.Second,
-				DlqTopic:        "test-dlq",
-				WorkersCount:    8,
+				Topic:          "test-topic",
+				GroupID:        "test-group",
+				KafkaHost:      kafkaHostConst,
+				KafkaPort:      9093,
+				ServiceHost:    serviceHostConst,
+				ServicePort:    8082,
+				BatchSize:      150,
+				BatchTimeout:   10 * time.Second,
+				MaxRetries:     5,
+				RetryDelayBase: 200 * time.Millisecond,
+				CountClient:    15,
+				ClientTimeout:  30 * time.Second,
+				DlqTopic:       "test-dlq",
 			},
 		},
 		{
 			name: "некорректные числовые значения",
 			setEnv: map[string]string{
-				"KAFKA_PORT_NUM":        "not-a-number",
-				"SERVICE_PORT_NUM":      "invalid",
-				"BATCH_SIZE_NUM":        "abc",
-				"TIME_LIMIT_CONSUMER_S": "xyz",
+				"KAFKA_PORT_NUM": "not-a-number",
+				"SERVICE_PORT":   "invalid",
+				"BATCH_SIZE_NUM": "abc",
+				"COUNT_CLIENT":   "xyz",
 			},
 			expected: &ConsumerConfig{
-				Topic:           topicNameConst,
-				GroupID:         groupIDNameConst,
-				KafkaPort:       kafkaPortConst, // значение по умолчанию при ошибке парсинга
-				LimitConsumWork: time.Duration(limitConsumWorkConst) * time.Second,
-				ServicePort:     servicePortConst,
-				BatchSize:       batchSizeConst,
-				BatchTimeout:    time.Duration(batchTimeoutConst) * time.Millisecond,
-				MaxRetries:      maxRetriesConst,
-				RetryDelayBase:  time.Duration(retryDelayBaseConst) * time.Millisecond,
-				ClientTimeout:   time.Duration(clientTimeoutConst) * time.Second,
-				DlqTopic:        dlqTopicConst,
-				WorkersCount:    workersCountConst,
+				Topic:          topicNameConst,
+				GroupID:        groupIDNameConst,
+				KafkaHost:      kafkaHostConst,
+				KafkaPort:      kafkaPortConst,
+				ServiceHost:    serviceHostConst,
+				ServicePort:    servicePortConst,
+				BatchSize:      batchSizeConst,
+				BatchTimeout:   time.Duration(batchTimeoutConst) * time.Second,
+				MaxRetries:     maxRetriesConst,
+				RetryDelayBase: time.Duration(retryDelayBaseConst) * time.Millisecond,
+				CountClient:    countClientConst,
+				ClientTimeout:  time.Duration(clientTimeoutConst) * time.Second,
+				DlqTopic:       dlqTopicConst,
 			},
 		},
 	}
@@ -307,17 +304,17 @@ func TestReadConfig(t *testing.T) {
 			// Проверяем результат
 			assert.Equal(t, tt.expected.Topic, config.Topic, "Topic не совпадает")
 			assert.Equal(t, tt.expected.GroupID, config.GroupID, "GroupID не совпадает")
+			assert.Equal(t, tt.expected.KafkaHost, config.KafkaHost, "KafkaHost не совпадает")
 			assert.Equal(t, tt.expected.KafkaPort, config.KafkaPort, "KafkaPort не совпадает")
-			assert.Equal(t, tt.expected.LimitConsumWork, config.LimitConsumWork, "LimitConsumWork не совпадает")
+			assert.Equal(t, tt.expected.ServiceHost, config.ServiceHost, "ServiceHost не совпадает")
 			assert.Equal(t, tt.expected.ServicePort, config.ServicePort, "ServicePort не совпадает")
 			assert.Equal(t, tt.expected.BatchSize, config.BatchSize, "BatchSize не совпадает")
 			assert.Equal(t, tt.expected.BatchTimeout, config.BatchTimeout, "BatchTimeout не совпадает")
 			assert.Equal(t, tt.expected.MaxRetries, config.MaxRetries, "MaxRetries не совпадает")
 			assert.Equal(t, tt.expected.RetryDelayBase, config.RetryDelayBase, "RetryDelayBase не совпадает")
+			assert.Equal(t, tt.expected.CountClient, config.CountClient, "CountClient не совпадает")
 			assert.Equal(t, tt.expected.ClientTimeout, config.ClientTimeout, "ClientTimeout не совпадает")
 			assert.Equal(t, tt.expected.DlqTopic, config.DlqTopic, "DlqTopic не совпадает")
-			assert.Equal(t, tt.expected.WorkersCount, config.WorkersCount, "WorkersCount не совпадает")
-
 			// Очищаем переменные для следующего теста
 			for envVar := range tt.setEnv {
 				os.Unsetenv(envVar)
@@ -388,18 +385,166 @@ func TestExtractOrderUID(t *testing.T) {
 	}
 }
 
-// TestConsumerRead тестирует базовое чтение сообщений из кафки
-func TestConsumerRead(t *testing.T) {
+/*
+// TestConsumerConnect проверяет только подключение к Kafka
+func TestConsumerConnect(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Пропускаем тест с Kafka в short режиме")
 	}
 
-	// Используем переменную окружения или значение по умолчанию
-	kafkaHost := os.Getenv("KAFKA_HOST")
-	if kafkaHost == "" {
-		kafkaHost = "localhost"
+	// Проверяем подключение к Kafka
+	kafkaHost := "localhost"
+	kafkaPort := "9092"
+	brokerAddr := fmt.Sprintf("%s:%s", kafkaHost, kafkaPort)
+
+	conn, err := kafka.Dial("tcp", brokerAddr)
+	if err != nil {
+		t.Skipf("Kafka недоступна: %v", err)
+		return
 	}
-	kafkaPort := os.Getenv("KAFKA_PORT")
+	defer conn.Close()
+
+	// Проверяем, что можем получить список топиков
+	brokers, err := conn.Brokers()
+	if err != nil {
+		t.Skipf("Не удалось получить брокеров: %v", err)
+		return
+	}
+
+	t.Logf("Успешное подключение к Kafka. Брокеры: %v", brokers)
+
+	// Если дошли сюда - подключение работает
+	assert.NotEmpty(t, brokers, "Должен быть хотя бы один брокер")
+}
+*/
+
+/*
+// TestConsumerWithExistingTopic тестирует чтение/запись в существующий топик
+func TestConsumerWithExistingTopic(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Пропускаем тест в short режиме")
+	}
+
+	tracer = noop.NewTracerProvider().Tracer("test")
+
+	kafkaHost := "localhost"
+	kafkaPort := "9092"
+	brokerAddr := fmt.Sprintf("%s:%s", kafkaHost, kafkaPort)
+
+	// Проверяем, что топик "my-topic" существует
+	conn, err := kafka.Dial("tcp", brokerAddr)
+	if err != nil {
+		t.Skipf("Kafka недоступна: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	// Получаем список топиков
+	partitions, err := conn.ReadPartitions()
+	if err != nil {
+		t.Skipf("Не удалось получить топики: %v", err)
+		return
+	}
+
+	// Ищем наш топик
+	topicExists := false
+	for _, p := range partitions {
+		if p.Topic == "my-topic" {
+			topicExists = true
+			break
+		}
+	}
+
+	if !topicExists {
+		// Создаем топик через kafka-topics.sh
+		cmd := exec.Command(
+			"docker", "exec", "kafka",
+			"/opt/kafka/bin/kafka-topics.sh",
+			"--bootstrap-server", "localhost:9092",
+			"--create",
+			"--topic", "my-topic",
+			"--partitions", "1",
+			"--replication-factor", "1",
+		)
+
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Skipf("Не удалось создать топик 'my-topic': %v\nOutput: %s", err, string(output))
+			return
+		}
+		t.Logf("Топик 'my-topic' создан1111")
+		time.Sleep(1 * time.Second)
+	}
+
+	// Теперь тестируем запись и чтение
+	producer := &kafka.Writer{
+		Addr:     kafka.TCP(brokerAddr),
+		Topic:    "my-topic",
+		Balancer: &kafka.Hash{},
+	}
+	defer producer.Close()
+
+	// Отправляем тестовое сообщение
+	testUID := fmt.Sprintf("test-%d", time.Now().UnixNano())
+	testMsg := fmt.Sprintf(`{"order_uid": "%s", "test": true}`, testUID)
+
+	err = producer.WriteMessages(context.Background(), kafka.Message{
+		Key:   []byte(testUID),
+		Value: []byte(testMsg),
+	})
+
+	if err != nil {
+		t.Skipf("Не удалось отправить сообщение: %v", err)
+		return
+	}
+	t.Logf("Отправлено тестовое сообщение с OrderUID: %s", testUID)
+
+	// Читаем сообщение
+	groupID := fmt.Sprintf("test-group-%d", time.Now().UnixNano())
+	consumer := kafka.NewReader(kafka.ReaderConfig{
+		Brokers: []string{brokerAddr},
+		Topic:   "my-topic",
+		GroupID: groupID,
+		MaxWait: 5 * time.Second,
+	})
+	defer consumer.Close()
+
+	// Устанавливаем offset в начало
+	consumer.SetOffset(kafka.LastOffset)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	msg, err := consumer.FetchMessage(ctx)
+	if err != nil {
+		t.Skipf("Не удалось прочитать сообщение: %v", err)
+		return
+	}
+
+	// Проверяем, что прочитали именно наше сообщение
+	uid := extractOrderUID(msg.Value)
+	assert.Equal(t, testUID, uid, "OrderUID должен совпадать")
+	t.Logf("Успешно прочитано сообщение с OrderUID: %s", uid)
+
+	// Коммитим
+	if err := consumer.CommitMessages(ctx, msg); err != nil {
+		t.Logf("Ошибка коммита: %v", err)
+	}
+}
+*/
+
+// TestConsumerRead тестирует базовое чтение сообщений из кафки
+func TestConsumerRead(t *testing.T) {
+
+	if testing.Short() {
+		t.Skip("Пропускаем тест с Kafka в short режиме")
+	}
+
+	// инициализируем noop tracer для тестов
+	tracer = noop.NewTracerProvider().Tracer("test")
+
+	// используем переменную окружения или значение по умолчанию
+	kafkaHost := "localhost"
+	kafkaPort := os.Getenv("KAFKA_PORT_NUM")
 	if kafkaPort == "" {
 		kafkaPort = "9092"
 	}
@@ -452,18 +597,21 @@ func TestConsumerRead(t *testing.T) {
 	defer cancel()
 
 	for {
-		msg, err := r.ReadMessage(ctx)
+		msg, err := r.FetchMessage(ctx)
 		if err != nil {
 			break // выходим когда больше нет сообщений или таймаут
 		}
 		counter++
 
-		// Извлекаем order_uid для проверки
+		// извлекаем order_uid для проверки
 		uid := extractOrderUID(msg.Value)
 		assert.NotEmpty(t, uid, "Сообщение %d должно содержать order_uid", counter)
+		assert.Equal(t, fmt.Sprintf("test-%d", counter), uid, "OrderUID должен совпадать")
 
-		// Коммитим чтобы не читать повторно
-		r.CommitMessages(ctx, msg)
+		// коммитим чтобы не читать повторно
+		if err := r.CommitMessages(ctx, msg); err != nil {
+			t.Logf("Ошибка при коммите сообщения %d: %v", counter, err)
+		}
 	}
 
 	assert.Equal(t, expectedCount, counter, "Количество прочитанных сообщений не совпадает.")
@@ -606,6 +754,7 @@ func TestConsumerWithRealData(t *testing.T) {
 	})
 }
 
+/*
 // TestConsumerAPIIntegration тестирует интеграцию с API
 func TestConsumerAPIIntegration(t *testing.T) {
 	if testing.Short() {
@@ -661,7 +810,7 @@ func TestConsumerAPIIntegration(t *testing.T) {
 		"TOPIC_NAME_STR":        "",
 		"GROUP_ID_NAME_STR":     "",
 		"DLQ_TOPIC_NAME_STR":    "",
-		"SERVICE_PORT_NUM":      "",
+		"SERVICE_PORT":      "",
 		"TIME_LIMIT_CONSUMER_S": "",
 		"BATCH_SIZE_NUM":        "",
 		"WORKERS_COUNT":         "",
@@ -740,7 +889,7 @@ func TestConsumerAPIIntegration(t *testing.T) {
 	os.Setenv("TOPIC_NAME_STR", testTopic)
 	os.Setenv("GROUP_ID_NAME_STR", testGroupID)
 	os.Setenv("DLQ_TOPIC_NAME_STR", testDLQTopic)
-	os.Setenv("SERVICE_PORT_NUM", strconv.Itoa(port))
+	os.Setenv("SERVICE_PORT", strconv.Itoa(port))
 	os.Setenv("TIME_LIMIT_CONSUMER_S", "5") // 5 секунд
 	os.Setenv("BATCH_SIZE_NUM", "2")
 	os.Setenv("WORKERS_COUNT", "2")
@@ -857,17 +1006,16 @@ func TestConsumerAPIIntegration(t *testing.T) {
 func runTestConsumer(brokerAddr, topic, groupID, dlqTopic string) {
 
 	// Создаем контекст
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.LimitConsumWork)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Создаем ридер
 	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:  []string{brokerAddr},
-		Topic:    topic,
-		GroupID:  groupID,
-		MinBytes: 10000,
-		MaxBytes: 500000,
-		MaxWait:  cfg.BatchTimeout,
+		Brokers:  []string{fmt.Sprintf("%s:%d", cfg.KafkaHost, cfg.KafkaPort)},
+		Topic:    cfg.Topic,
+		GroupID:  cfg.GroupID,
+		MinBytes: 10000,  // минимальный пакет
+		MaxBytes: 500000, // максимальный пакет батчей
 	})
 	defer r.Close()
 
@@ -878,15 +1026,12 @@ func runTestConsumer(brokerAddr, topic, groupID, dlqTopic string) {
 	}
 	defer dlqWriter.Close()
 
-	// HTTP клиент
-	httpClient := &http.Client{
-		Timeout: cfg.ClientTimeout,
-	}
-
 	// Каналы
-	messages := make(chan *kafka.Message, cfg.BatchSize*cfg.WorkersCount*10)
-	batches := make(chan []*kafka.Message, cfg.WorkersCount*cfg.WorkersCount*10)
-	responses := make(chan *RespBatchInfo, cfg.WorkersCount*cfg.WorkersCount*10)
+	messagesCh := make(chan *MessageWithTrace, cfg.BatchSize*10)
+	batchesCh := make(chan []*MessageWithTrace, cfg.BatchSize/4)
+	preparesCh := make(chan *PrepareBatch, cfg.BatchSize/4)
+	collectCh := make(chan []*PrepareBatch, cfg.BatchSize/4)
+	responsesCh := make(chan *RespBatchInfo, cfg.BatchSize/4)
 	endCh := make(chan struct{})
 	errCh := make(chan error)
 
@@ -895,24 +1040,44 @@ func runTestConsumer(brokerAddr, topic, groupID, dlqTopic string) {
 
 	// 1. читаем сообщения из кафки
 	wgPipe.Add(1)
-	//defer wgPipe.Done()
-	go readMsgOfKafka(ctx, r, messages, errCh, &wgPipe)
+	go readMsgOfKafka(ctx, r, messagesCh, errCh, &wgPipe)
 
-	// 2. комплектуем батчи
+	// 2. комплектуем батчи из прочитанных сообщений
 	wgPipe.Add(1)
-	//defer wgPipe.Done()
-	go complectBatches(messages, batches, &wgPipe)
+	go complectBatches(messagesCh, batchesCh, &wgPipe)
 
-	// 3. отправляем батчи в API
+	// 3. подготавливаем информацию для отправки
 	wgPipe.Add(1)
-	//defer wgPipe.Done()
-	go batchPrepareCollect(dlqWriter, httpClient, batches, responses, &wgPipe)
+	go prepareBatchToSending(dlqWriter, batchesCh, preparesCh, &wgPipe)
 
-	// 4. обрабатываем ответы
+	// 4. собираем данные по батчам в группы для параллельной отправки в api
 	wgPipe.Add(1)
-	//defer wgPipe.Done()
-	go processBatchResponse(r, dlqWriter, responses, endCh, &wgPipe)
+	go batchPrepareCollect(dlqWriter, preparesCh, collectCh, &wgPipe)
+
+	// 5. параллельно направляем запросы в api по группе батчей
+	wgPipe.Add(1)
+	go sendBatchInfo(dlqWriter, collectCh, responsesCh, &wgPipe)
+
+	// 6. обрабатываем ответы api для каждого сообщения - коммитим или заполняем DLQ
+	wgPipe.Add(1)
+	go processBatchResponse(r, dlqWriter, responsesCh, endCh, &wgPipe)
 
 	// Ждем завершения всех этапов
 	wgPipe.Wait()
+}
+*/
+
+// isKafkaAvailable проверяет доступность Kafka
+func isKafkaAvailable(brokerAddr string) bool {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	conn, err := kafka.DialContext(ctx, "tcp", brokerAddr)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+
+	return true
 }

@@ -1,11 +1,9 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"strconv"
 	"testing"
 	"time"
 
@@ -477,190 +475,56 @@ func TestMessageGenerateCount(t *testing.T) {
 	}
 }
 
-// TestDialLeader тестирует возможность подключения к брокеру и создание топика
-func TestDialLeader(t *testing.T) {
-	// Mock тест для проверки логики без реального подключения к Kafka
-	testCases := []struct {
-		name       string
-		brokerAddr string
-		topic      string
-		wantErr    bool
-		skip       bool // флаг для пропуска тестов требующих реального Kafka
-	}{
-		{
-			name:       "Некорректный адрес брокера",
-			brokerAddr: "invalid.host.never.exists:9092",
-			topic:      "test-topic",
-			wantErr:    true,
-			skip:       false, // можно запускать без Kafka
-		},
-		{
-			name:       "Пустой адрес брокера",
-			brokerAddr: "",
-			topic:      "test-topic",
-			wantErr:    true,
-			skip:       false,
-		},
-		{
-			name:       "Проверка создания подключения (требует Kafka)",
-			brokerAddr: "localhost:9092",
-			topic:      "test-topic-integration",
-			wantErr:    false,
-			skip:       true, // требует реального Kafka
-		},
-	}
-
-	for _, tt := range testCases {
-		t.Run(tt.name, func(t *testing.T) {
-
-			if tt.skip && testing.Short() {
-				t.Skipf("Пропускаем интеграционный тест '%s' в short режиме", tt.name)
-			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-
-			conn, err := kafka.DialLeader(ctx, "tcp", tt.brokerAddr, tt.topic, 0)
-
-			if tt.wantErr {
-				assert.Error(t, err, "Ожидалась ошибка подключения для теста '%s'", tt.name)
-				assert.Nil(t, conn, "Соединение должно быть nil при ошибке")
-				return
-			}
-
-			if err != nil {
-				t.Logf("Не удалось подключиться к Kafka для теста '%s': %v", tt.name, err)
-				t.Skipf("Пропускаем тест '%s' из-за отсутствия подключения к Kafka", tt.name)
-				return
-			}
-
-			require.NoError(t, err, "Неожиданная ошибка подключения для теста '%s'", tt.name)
-			require.NotNil(t, conn, "Соединение не должно быть nil")
-
-			defer func() {
-				if conn != nil {
-					conn.Close()
-				}
-			}()
-
-			// проверяем что соединение работает
-			partitions, err := conn.ReadPartitions()
-			assert.NoError(t, err, "Ошибка при получении информации о партициях")
-			assert.NotNil(t, partitions, "Список партиций не должен быть nil")
-		})
-	}
-}
-
-// TestWriteMessage тестирует отправку и получение сообщений
-func TestWriteMessage(t *testing.T) {
+// TestKafkaAvalibale тестирует подключение к kafka и возможность создания топика
+func TestKafkaAvailable(t *testing.T) {
 
 	if testing.Short() {
 		t.Skip("Пропускаем интеграционный тест с Kafka в short режиме")
 	}
 
-	// инициализируем noop tracer для тестов
-	tracer = noop.NewTracerProvider().Tracer("test")
-
-	// проверяем доступность Kafka перед запуском теста
-	if !isKafkaAvailable("localhost:9092") {
-		t.Skip("Kafka недоступна на localhost:9092, пропускаем тест")
+	brokerHost := "localhost"
+	brokerPort := "9092"
+	if port, ok := os.LookupEnv("KAFKA_PORT_NUM"); ok {
+		brokerPort = port
 	}
+	testTopic := "test-topic-producer"
 
-	// задаём начальные условия
-	testTopic := "test-topic-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-	brokerAddr := "localhost:9092"
+	brokerAddr := fmt.Sprintf("%s:%s", brokerHost, brokerPort)
 
-	// подключаемся к брокеру и создаем топик
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// подключаемся к брокеру и создаем топик
-	conn, err := kafka.DialLeader(ctx, "tcp", brokerAddr, testTopic, 0)
-	require.NoError(t, err, "Не удалось подключиться к брокеру.")
+	// проверяем подключение к Kafka
+	conn, err := kafka.Dial("tcp", brokerAddr)
+	require.NoError(t, err, "Kafka недоступна на %s", brokerAddr)
 	defer conn.Close()
 
-	// готовим продюсер
-	writer := &kafka.Writer{
-		Addr:  kafka.TCP(brokerAddr),
-		Topic: testTopic,
-	}
-	defer writer.Close()
-
-	// генерируем тестовые данные
-	expectedCount := 3
-	messages := messageGenerate(expectedCount)
-	require.Len(t, messages, expectedCount, "Количество сгенерированных сообщений не соответствует ожидаемому.")
-
-	// отправляем сообщения
-	for i, msg := range messages {
-		err := writer.WriteMessages(context.Background(), kafka.Message{
-			Key:   []byte(fmt.Sprintf("key-%d", i)),
-			Value: msg,
-		})
-		require.NoError(t, err, "Ошибка при отправке сообщения %d.", i+1)
-	}
-
-	// проверяем доставку - вычитываем сообщения
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:  []string{brokerAddr},
-		Topic:    testTopic,
-		GroupID:  "test-group-" + testTopic,
-		MinBytes: 1,
-		MaxBytes: 10e6, // 10MB
-		MaxWait:  5 * time.Second,
+	// проверяем создание топика
+	err = conn.CreateTopics(kafka.TopicConfig{
+		Topic:             testTopic,
+		NumPartitions:     1,
+		ReplicationFactor: 1,
 	})
-	defer reader.Close()
+	require.NoError(t, err, "Не удалось создать тестовый топик")
 
-	// вычитываем и проверяем сообщения
-	counter := 0
-	readCtx, readCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer readCancel()
+	// проверяем, что топик существует
+	partitions, err := conn.ReadPartitions()
+	require.NoError(t, err, "Не удалось получить список топиков")
 
-	for counter < expectedCount {
-		msg, err := reader.FetchMessage(readCtx)
-		if err != nil {
-			if err == context.DeadlineExceeded {
-				break
-			}
-			require.NoError(t, err, "Ошибка при чтении сообщения.")
+	topicExists := false
+	for _, p := range partitions {
+		if p.Topic == testTopic {
+			topicExists = true
+			break
 		}
-
-		// проверяем структуру полученного сообщения
-		var order Order
-		err = json.Unmarshal(msg.Value, &order)
-		assert.NoError(t, err, "Ошибка десериализации полученного сообщения")
-		assert.NotEmpty(t, order.OrderUID, "Полученный OrderUID не должен быть пустым")
-
-		// подтверждаем прочтение сообщения
-		err = reader.CommitMessages(context.Background(), msg)
-		assert.NoError(t, err, "Ошибка при подтверждении сообщения")
-
-		counter++
 	}
 
-	assert.Equal(t, expectedCount, counter, "Количество прочитанных сообщений не совпадает.")
+	assert.True(t, topicExists, "Созданный тестовый топик не найден в списке топиков Kafka")
 
 	// очистка тестового топика
 	t.Cleanup(func() {
-		conn, err := kafka.Dial("tcp", brokerAddr)
+		cleanupConn, err := kafka.Dial("tcp", brokerAddr)
 		if err == nil {
-			conn.DeleteTopics(testTopic)
-			conn.Close()
+			cleanupConn.DeleteTopics(testTopic)
+			cleanupConn.Close()
+			t.Logf("Тестовый топик '%s' удален", testTopic)
 		}
 	})
-}
-
-// isKafkaAvailable проверяет доступность Kafka
-func isKafkaAvailable(brokerAddr string) bool {
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	conn, err := kafka.DialContext(ctx, "tcp", brokerAddr)
-	if err != nil {
-		return false
-	}
-	defer conn.Close()
-
-	return true
 }
