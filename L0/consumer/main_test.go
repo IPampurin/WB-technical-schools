@@ -393,6 +393,7 @@ func TestExtractOrderUID(t *testing.T) {
 	}
 }
 
+// TestConsumPipelineIntegrations тестирует работу конвейера с подключением к тестовому брокеру
 func TestConsumPipelineIntegrations(t *testing.T) {
 
 	if testing.Short() {
@@ -672,7 +673,7 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 			break
 		}
 		dlqMessages = append(dlqMessages, msg)
-		dlqReader.CommitMessages(ctx, msg)
+		dlqReader.CommitMessages(dlqCtx, msg)
 	}
 
 	dlqCount := len(dlqMessages)

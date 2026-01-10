@@ -1,15 +1,22 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"net"
 	"os"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/segmentio/kafka-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	tcKafka "github.com/testcontainers/testcontainers-go/modules/kafka"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
@@ -475,56 +482,169 @@ func TestMessageGenerateCount(t *testing.T) {
 	}
 }
 
-// TestKafkaAvalibale тестирует подключение к kafka и возможность создания топика
-func TestKafkaAvailable(t *testing.T) {
+// TestProduceIntegrations тестирует работу продюсера с подключением к тестовому брокеру
+func TestProduceIntegrations(t *testing.T) {
 
 	if testing.Short() {
-		t.Skip("Пропускаем интеграционный тест с Kafka в short режиме")
+		t.Skip("Пропускаем интеграционный тест в short режиме")
 	}
 
-	brokerHost := "localhost"
-	brokerPort := "9092"
-	if port, ok := os.LookupEnv("KAFKA_PORT_NUM"); ok {
-		brokerPort = port
-	}
+	// инициализируем noop tracer
+	tracer = noop.NewTracerProvider().Tracer("test")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// 1. Запускаем контейнер с тестовой кафкой (для дополнительного разнообразия берём образ, отличный от проектного)
+	kafkaContainer, err := tcKafka.Run(ctx, "confluentinc/confluent-local:7.5.0",
+		tcKafka.WithClusterID("test-cluster"))
+	defer func() {
+		if err := testcontainers.TerminateContainer(kafkaContainer); err != nil {
+			t.Logf("ошибка при остановке kafkaContainer в тесте: %v", err)
+		}
+	}()
+
+	require.NoError(t, err, "Не удалось запустить Kafka контейнер")
+
+	// 2. Получаем адрес брокера
+	brokers, err := kafkaContainer.Brokers(ctx)
+	require.NoError(t, err, "Не удалось получить адрес брокера")
+	require.NotEmpty(t, brokers, "Список брокеров пуст")
+
+	brokerAddr := brokers[0]
+	t.Logf("Kafka запущена на: %s", brokerAddr)
+
+	// задаём имея топика
 	testTopic := "test-topic-producer"
 
-	brokerAddr := fmt.Sprintf("%s:%s", brokerHost, brokerPort)
+	// 3. Устанавливаем соединение с брокером и создаём топик
+	connTestTopic, err := kafka.DialLeader(ctx, "tcp", brokerAddr, testTopic, 0)
+	if err != nil {
+		t.Logf("ошибка создания тестового топика кафки в тесте: %v.\n", err)
+	}
+	defer func() {
+		// закрываем соединение testProduceConn
+		if err := connTestTopic.Close(); err != nil {
+			t.Logf("ошибка при закрытии соединения c тестовым топиком в тесте: %v.\n", err)
+		}
+	}()
 
-	// проверяем подключение к Kafka
-	conn, err := kafka.Dial("tcp", brokerAddr)
-	require.NoError(t, err, "Kafka недоступна на %s", brokerAddr)
-	defer conn.Close()
+	// 4. Настраиваем конфиг для продюсера
+	host, portStr, err := net.SplitHostPort(brokerAddr)
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
 
-	// проверяем создание топика
-	err = conn.CreateTopics(kafka.TopicConfig{
-		Topic:             testTopic,
-		NumPartitions:     1,
-		ReplicationFactor: 1,
+	// сохраняем оригинальный конфиг
+	origCfg := cfg
+	defer func() { cfg = origCfg }()
+
+	// меняем значения в конфиге на более соответствующие тестам
+	cfg = &ProducerConfig{
+		Topic:         testTopic,
+		KafkaHost:     host,
+		KafkaPort:     port,
+		MassagesCount: 10,
+		WritersCount:  50,
+	}
+
+	// 5. Создаём ряд врайтеров
+	writers := make([]*kafka.Writer, cfg.WritersCount)
+	for i := 0; i < len(writers); i++ {
+		// определяем продюсер
+		writers[i] = &kafka.Writer{
+			Addr:         kafka.TCP(brokerAddr), // список брокеров
+			Topic:        cfg.Topic,             // имя топика, в который будем слать сообщения
+			RequiredAcks: kafka.RequireAll,      // максимальный контроль доставки (подтверждение от всех реплик, если бы они были)
+		}
+		defer func() {
+			if err := writers[i].Close(); err != nil {
+				log.Printf("Ошибка при закрытии продюсера в тесте: %v.\n", err)
+			}
+		}()
+	}
+
+	var generatedCount int64 // количество сгенерированных сообщений
+	var countSended int64    // количество отправленных сообщений
+	var failedCount int64    // количество ошибок при отправке сообщений
+
+	t.Logf("Запускаем %d врайтеров.\n", len(writers))
+
+	// 6. Отправляем сообщения
+	var wg sync.WaitGroup
+
+	for i := 0; i < len(writers); i++ {
+		wg.Add(1)
+		go sendMessages(ctx, writers[i], &generatedCount, &countSended, &failedCount, &wg)
+	}
+
+	wg.Wait()
+
+	// на этом ^ имитация продюсера завершена, далее проверяем результаты
+
+	// 7. Создаём ридер из тестового топика
+	r := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:  []string{brokerAddr},
+		Topic:    cfg.Topic,
+		GroupID:  "test-group",
+		MinBytes: 10,
+		MaxBytes: 10e6,
 	})
-	require.NoError(t, err, "Не удалось создать тестовый топик")
+	defer func() {
+		if err := r.Close(); err != nil {
+			t.Logf("ошибка при закрытии ридера Kafka в тесте: %v", err)
+		}
+	}()
 
-	// проверяем, что топик существует
-	partitions, err := conn.ReadPartitions()
-	require.NoError(t, err, "Не удалось получить список топиков")
+	var messages []kafka.Message
+	testCtx, testCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer testCancel()
 
-	topicExists := false
-	for _, p := range partitions {
-		if p.Topic == testTopic {
-			topicExists = true
+	for {
+		msg, err := dlqReader.FetchMessage(dlqCtx)
+		if err != nil {
 			break
+		}
+		dlqMessages = append(dlqMessages, msg)
+		dlqReader.CommitMessages(ctx, msg)
+	}
+
+	dlqCount := len(dlqMessages)
+	t.Logf("В DLQ находится %d сообщений", dlqCount)
+
+	// 14. Проверяем результаты
+	apiRequestsMu.Lock()
+	t.Logf("API получило %d запросов", len(apiRequests))
+	t.Logf("Успешно обработано сообщений: %d", successCount)
+	apiRequestsMu.Unlock()
+
+	// проверяем сообщения в DLQ
+	dlqReader := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:  []string{brokerAddr},
+		Topic:    cfg.DlqTopic,
+		GroupID:  cfg.GroupID + "dlq",
+		MinBytes: 1,
+		MaxBytes: 10e6,
+	})
+	defer func() {
+		if err := dlqReader.Close(); err != nil {
+			t.Logf("ошибка при закрытии dlqReader в тесте: %v\n", err)
+		}
+	}()
+
+	// проверяем, что невалидные сообщения попали в DLQ
+	expectedDLQCount := 0
+	for i := 0; i < len(testMessages); i++ {
+		if (i+1)%5 == 0 {
+			expectedDLQCount++
 		}
 	}
 
-	assert.True(t, topicExists, "Созданный тестовый топик не найден в списке топиков Kafka")
+	assert.Equal(t, expectedDLQCount, dlqCount, "Количество сообщений в DLQ должно совпадать с ожидаемым (каждое 5-е)")
 
-	// очистка тестового топика
-	t.Cleanup(func() {
-		cleanupConn, err := kafka.Dial("tcp", brokerAddr)
-		if err == nil {
-			cleanupConn.DeleteTopics(testTopic)
-			cleanupConn.Close()
-			t.Logf("Тестовый топик '%s' удален", testTopic)
-		}
-	})
+	// Проверяем, что API получило только валидные сообщения
+	expectedAPICount := len(testMessages) - expectedDLQCount // 30 - 30/5 = 24 сообщения
+	assert.Equal(t, expectedAPICount, successCount, "API должно было получить только валидные сообщения")
+
+	t.Log("Тест конвейера потребителя завершен успешно")
 }
