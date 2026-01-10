@@ -397,7 +397,7 @@ func TestExtractOrderUID(t *testing.T) {
 func TestConsumPipelineIntegrations(t *testing.T) {
 
 	if testing.Short() {
-		t.Skip("Пропускаем интеграционный тест в short режиме")
+		t.Skip("Пропускаем интеграционный тест в short режиме.")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -412,15 +412,15 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 		}
 	}()
 
-	require.NoError(t, err, "Не удалось запустить Kafka контейнер")
+	require.NoError(t, err, "Не удалось запустить Kafka контейнер.")
 
 	// 2. Получаем адрес брокера
 	brokers, err := kafkaContainer.Brokers(ctx)
-	require.NoError(t, err, "Не удалось получить адрес брокера")
-	require.NotEmpty(t, brokers, "Список брокеров пуст")
+	require.NoError(t, err, "Не удалось получить адрес брокера.")
+	require.NotEmpty(t, brokers, "Список брокеров пуст.")
 
 	brokerAddr := brokers[0]
-	t.Logf("Kafka запущена на: %s", brokerAddr)
+	t.Logf("Kafka запущена на: %s.", brokerAddr)
 
 	// задаём имена топиков
 	testTopic := "test-topic-consumer"
@@ -447,6 +447,7 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 			t.Logf("ошибка при закрытии соединения с тестовым топиком DLQ в тесте: %v.\n", err)
 		}
 	}()
+	require.NoError(t, err, "Не удалось создать топик в Kafka.")
 
 	// 4. Создаём тестовые сообщения (30 штук), каждое пятое без OrderUID (для DLQ)
 	testMessages := generateTestMessages(30)
@@ -464,9 +465,9 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 	}()
 
 	err = writer.WriteMessages(ctx, testMessages...)
-	require.NoError(t, err, "Не удалось записать в кафку тестовые сообщения")
+	require.NoError(t, err, "Не удалось записать в кафку тестовые сообщения.")
 
-	t.Logf("Отправлено %d тестовых сообщений", len(testMessages))
+	t.Logf("Отправлено %d тестовых сообщений.", len(testMessages))
 
 	// на этом ^ имитация продюсера завершена
 
@@ -645,8 +646,8 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 
 	// 14. Проверяем результаты
 	apiRequestsMu.Lock()
-	t.Logf("API получило %d запросов", len(apiRequests))
-	t.Logf("Успешно обработано сообщений: %d", successCount)
+	t.Logf("API получило %d запросов.", len(apiRequests))
+	t.Logf("Успешно обработано сообщений: %d.", successCount)
 	apiRequestsMu.Unlock()
 
 	// проверяем сообщения в DLQ
@@ -677,7 +678,7 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 	}
 
 	dlqCount := len(dlqMessages)
-	t.Logf("В DLQ находится %d сообщений", dlqCount)
+	t.Logf("В DLQ находится %d сообщений.", dlqCount)
 
 	// проверяем, что невалидные сообщения попали в DLQ
 	expectedDLQCount := 0
@@ -687,13 +688,13 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, expectedDLQCount, dlqCount, "Количество сообщений в DLQ должно совпадать с ожидаемым (каждое 5-е)")
+	require.Equal(t, expectedDLQCount, dlqCount, "Количество сообщений в DLQ должно совпадать с ожидаемым (каждое 5-е).")
 
 	// Проверяем, что API получило только валидные сообщения
 	expectedAPICount := len(testMessages) - expectedDLQCount // 30 - 30/5 = 24 сообщения
-	assert.Equal(t, expectedAPICount, successCount, "API должно было получить только валидные сообщения")
+	require.Equal(t, expectedAPICount, successCount, "API должно было получить только валидные сообщения.")
 
-	t.Log("Тест конвейера потребителя завершен успешно")
+	t.Log("✅ Тест конвейера консумера завершен успешно.")
 }
 
 // generateTestMessages создает тестовые сообщения для Kafka

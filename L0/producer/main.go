@@ -320,11 +320,11 @@ func main() {
 			Async:        false,                                                         // можно установить true и получить максимальную скорость без гарантии доставки
 			RequiredAcks: kafka.RequireAll,                                              // максимальный контроль доставки (подтверждение от всех реплик, если бы они были)
 		}
-		defer func() {
-			if err := writers[i].Close(); err != nil {
+		defer func(idx int) {
+			if err := writers[idx].Close(); err != nil {
 				log.Printf("Ошибка при закрытии продюсера: %v.\n", err)
 			}
-		}()
+		}(i)
 	}
 
 	// организуем контекст для корректного завершения писателей

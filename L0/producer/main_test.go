@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -486,7 +487,7 @@ func TestMessageGenerateCount(t *testing.T) {
 func TestProduceIntegrations(t *testing.T) {
 
 	if testing.Short() {
-		t.Skip("Пропускаем интеграционный тест в short режиме")
+		t.Skip("Пропускаем интеграционный тест в short режиме.")
 	}
 
 	// инициализируем noop tracer
@@ -504,30 +505,32 @@ func TestProduceIntegrations(t *testing.T) {
 		}
 	}()
 
-	require.NoError(t, err, "Не удалось запустить Kafka контейнер")
+	require.NoError(t, err, "Не удалось запустить Kafka контейнер.")
 
 	// 2. Получаем адрес брокера
 	brokers, err := kafkaContainer.Brokers(ctx)
-	require.NoError(t, err, "Не удалось получить адрес брокера")
-	require.NotEmpty(t, brokers, "Список брокеров пуст")
+	require.NoError(t, err, "Не удалось получить адрес брокера.")
+	require.NotEmpty(t, brokers, "Список брокеров пуст.")
 
 	brokerAddr := brokers[0]
-	t.Logf("Kafka запущена на: %s", brokerAddr)
-
-	// задаём имея топика
-	testTopic := "test-topic-producer"
+	t.Logf("Kafka запущена на: %s.\n", brokerAddr)
 
 	// 3. Устанавливаем соединение с брокером и создаём топик
-	connTestTopic, err := kafka.DialLeader(ctx, "tcp", brokerAddr, testTopic, 0)
+
+	// задаём имя топика
+	testTopic := "test-topic-producer"
+
+	conn, err := kafka.DialLeader(ctx, "tcp", brokerAddr, testTopic, 0)
 	if err != nil {
-		t.Logf("ошибка создания тестового топика кафки в тесте: %v.\n", err)
+		t.Logf("ошибка создания тестового топика кафки в тесте: %v\n", err)
 	}
 	defer func() {
 		// закрываем соединение testProduceConn
-		if err := connTestTopic.Close(); err != nil {
-			t.Logf("ошибка при закрытии соединения c тестовым топиком в тесте: %v.\n", err)
+		if err := conn.Close(); err != nil {
+			t.Logf("ошибка при закрытии соединения c тестовым топиком в тесте: %v\n", err)
 		}
 	}()
+	require.NoError(t, err, "Не удалось создать топик в Kafka.")
 
 	// 4. Настраиваем конфиг для продюсера
 	host, portStr, err := net.SplitHostPort(brokerAddr)
@@ -539,14 +542,21 @@ func TestProduceIntegrations(t *testing.T) {
 	origCfg := cfg
 	defer func() { cfg = origCfg }()
 
+	messagesCount := 10 // количество сообщений отправителя
+	writersCount := 5   // количество отправителей
+	// сколько сообщений ожидаем на выходе
+	expectedTotalMessages := messagesCount * writersCount
+
 	// меняем значения в конфиге на более соответствующие тестам
 	cfg = &ProducerConfig{
 		Topic:         testTopic,
 		KafkaHost:     host,
 		KafkaPort:     port,
-		MassagesCount: 10,
-		WritersCount:  50,
+		MassagesCount: messagesCount,
+		WritersCount:  writersCount,
 	}
+
+	t.Logf("Конфиг: %d врайтеров, по %d сообщений каждый.\n", cfg.WritersCount, cfg.MassagesCount)
 
 	// 5. Создаём ряд врайтеров
 	writers := make([]*kafka.Writer, cfg.WritersCount)
@@ -556,12 +566,13 @@ func TestProduceIntegrations(t *testing.T) {
 			Addr:         kafka.TCP(brokerAddr), // список брокеров
 			Topic:        cfg.Topic,             // имя топика, в который будем слать сообщения
 			RequiredAcks: kafka.RequireAll,      // максимальный контроль доставки (подтверждение от всех реплик, если бы они были)
+			BatchSize:    cfg.MassagesCount,     // отправляем батчем для скорости в тесте
 		}
-		defer func() {
-			if err := writers[i].Close(); err != nil {
-				log.Printf("Ошибка при закрытии продюсера в тесте: %v.\n", err)
+		defer func(idx int) {
+			if err := writers[idx].Close(); err != nil {
+				log.Printf("Ошибка при закрытии врайтера продюсера в тесте: %v.\n", err)
 			}
-		}()
+		}(i)
 	}
 
 	var generatedCount int64 // количество сгенерированных сообщений
@@ -571,6 +582,7 @@ func TestProduceIntegrations(t *testing.T) {
 	t.Logf("Запускаем %d врайтеров.\n", len(writers))
 
 	// 6. Отправляем сообщения
+	startTime := time.Now()
 	var wg sync.WaitGroup
 
 	for i := 0; i < len(writers); i++ {
@@ -579,72 +591,105 @@ func TestProduceIntegrations(t *testing.T) {
 	}
 
 	wg.Wait()
+	sendDuration := time.Since(startTime)
+	t.Logf("Отправка завершена за %v.\n", sendDuration)
 
-	// на этом ^ имитация продюсера завершена, далее проверяем результаты
+	// 7. Проверяем результаты отправки
+	t.Logf("Сгенерировано: %d, Отправлено: %d, Ошибок: %d.\n", atomic.LoadInt64(&generatedCount), atomic.LoadInt64(&countSended), atomic.LoadInt64(&failedCount))
 
-	// 7. Создаём ридер из тестового топика
+	// проверяем, что нет ошибок при отправке
+	assert.Equal(t, int64(0), atomic.LoadInt64(&failedCount), "Не должно быть ошибок при отправке сообщений.")
+
+	// проверяем, что сгенерировано и отправлено ожидаемое количество
+	require.Equal(t, int64(expectedTotalMessages), atomic.LoadInt64(&generatedCount),
+		"Количество сгенерированных сообщений должно соответствовать ожидаемому.")
+	assert.Equal(t, int64(expectedTotalMessages), atomic.LoadInt64(&countSended),
+		"Количество отправленных сообщений должно соответствовать ожидаемому.")
+
+	// 8. Создаём ридер из тестового топика
 	r := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:  []string{brokerAddr},
 		Topic:    cfg.Topic,
-		GroupID:  "test-group",
+		GroupID:  "test-group-producer",
 		MinBytes: 10,
 		MaxBytes: 10e6,
 	})
 	defer func() {
 		if err := r.Close(); err != nil {
-			t.Logf("ошибка при закрытии ридера Kafka в тесте: %v", err)
+			t.Logf("ошибка при закрытии ридера из тестового топика в тесте: %v", err)
 		}
 	}()
 
+	// 9. Вычитываем сообщения из кафки
 	var messages []kafka.Message
-	testCtx, testCancel := context.WithTimeout(ctx, 2*time.Second)
+	readCtx, testCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer testCancel()
 
+	readStart := time.Now()
 	for {
-		msg, err := dlqReader.FetchMessage(dlqCtx)
+		msg, err := r.FetchMessage(readCtx)
 		if err != nil {
+			if err == context.DeadlineExceeded || err == context.Canceled {
+				break
+			}
+			t.Logf("ошибка чтения сообщения: %v", err)
 			break
 		}
-		dlqMessages = append(dlqMessages, msg)
-		dlqReader.CommitMessages(ctx, msg)
+		messages = append(messages, msg)
+		r.CommitMessages(readCtx, msg)
 	}
+	readDuration := time.Since(readStart)
 
-	dlqCount := len(dlqMessages)
-	t.Logf("В DLQ находится %d сообщений", dlqCount)
+	mesCount := len(messages)
+	t.Logf("Прочитано %d сообщений за %v.", mesCount, readDuration)
 
-	// 14. Проверяем результаты
-	apiRequestsMu.Lock()
-	t.Logf("API получило %d запросов", len(apiRequests))
-	t.Logf("Успешно обработано сообщений: %d", successCount)
-	apiRequestsMu.Unlock()
+	// 10. Проверяем результаты
+	offsetCtx, offsetCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer offsetCancel()
 
-	// проверяем сообщения в DLQ
-	dlqReader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:  []string{brokerAddr},
-		Topic:    cfg.DlqTopic,
-		GroupID:  cfg.GroupID + "dlq",
-		MinBytes: 1,
-		MaxBytes: 10e6,
-	})
+	conn2, err := kafka.DialLeader(offsetCtx, "tcp", brokerAddr, testTopic, 0)
+	require.NoError(t, err, "Не удалось подключиться к Kafka для проверки offset.")
 	defer func() {
-		if err := dlqReader.Close(); err != nil {
-			t.Logf("ошибка при закрытии dlqReader в тесте: %v\n", err)
+		if err := conn2.Close(); err != nil {
+			t.Logf("ошибка закрытия подключения conn2 к кафке в тесте: %v", err)
 		}
 	}()
 
-	// проверяем, что невалидные сообщения попали в DLQ
-	expectedDLQCount := 0
-	for i := 0; i < len(testMessages); i++ {
-		if (i+1)%5 == 0 {
-			expectedDLQCount++
-		}
+	// получаем первый и последний offset
+	firstOffset, err := conn2.ReadFirstOffset()
+	require.NoError(t, err, "Не удалось получить первый offset.")
+
+	lastOffset, err := conn2.ReadLastOffset()
+	require.NoError(t, err, "Не удалось получить последний offset.")
+
+	// количество сообщений в топике
+	messagesInTopic := lastOffset - firstOffset
+	t.Logf("Смещения в топике: first=%d, last=%d, сообщений=%d.",
+		firstOffset, lastOffset, messagesInTopic)
+
+	// проверяем, что количество сообщений в топике соответствует ожидаемому
+	require.Equal(t, int64(expectedTotalMessages), messagesInTopic,
+		"Количество сообщений в топике должно соответствовать отправленным (offset: %d-%d=%d, ожидали: %d).",
+		lastOffset, firstOffset, messagesInTopic, expectedTotalMessages)
+
+	// если прочитали меньше, чем ожидали, но offset показывает правильное количество, значит проблема во времени чтения (таймаут)
+	assert.Equal(t, expectedTotalMessages, mesCount,
+		"Количество прочитанных сообщений должно соответствовать отправленным. Прочитано: %d, Ожидалось: %d, Offset показывает: %d.",
+		mesCount, expectedTotalMessages, messagesInTopic)
+
+	// если прочитали не все, но offset правильный, даём подсказку
+	if mesCount < expectedTotalMessages {
+		t.Logf("ошибка: прочитано %d из %d сообщений. Попробуйте увеличить таймаут чтения (сейчас 10 сек).\n",
+			mesCount, expectedTotalMessages)
+
+		// хотя бы одно сообщение должно быть прочитано, если не прочитано ни одного - что-то не так
+		require.Greater(t, mesCount, 0,
+			"Должно быть прочитано хотя бы одно сообщение. "+"Проверьте настройки ридера и соединение с Kafka.")
+	} else {
+		t.Logf("✓ Успешно прочитаны все %d сообщений.", mesCount)
 	}
 
-	assert.Equal(t, expectedDLQCount, dlqCount, "Количество сообщений в DLQ должно совпадать с ожидаемым (каждое 5-е)")
-
-	// Проверяем, что API получило только валидные сообщения
-	expectedAPICount := len(testMessages) - expectedDLQCount // 30 - 30/5 = 24 сообщения
-	assert.Equal(t, expectedAPICount, successCount, "API должно было получить только валидные сообщения")
-
-	t.Log("Тест конвейера потребителя завершен успешно")
+	t.Logf("✅ Тест продюсера завершен: отправлено %d сообщений через %d врайтеров за %v.\n"+
+		"В топике: %d сообщений (по offset), прочитано: %d сообщений за %v.\n",
+		expectedTotalMessages, writersCount, sendDuration, messagesInTopic, mesCount, readDuration)
 }
