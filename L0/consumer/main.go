@@ -292,7 +292,7 @@ func consumer(ctx context.Context, errCh chan<- error, endCh chan struct{}) {
 
 	// 4. собираем данные по батчам в группы для параллельной отправки в api
 	wgPipe.Add(1)
-	go batchPrepareCollect(dlqWriter, preparesCh, collectCh, &wgPipe)
+	go batchPrepareCollect(preparesCh, collectCh, &wgPipe)
 
 	// 5. параллельно направляем запросы в api по группе батчей
 	wgPipe.Add(1)
@@ -625,7 +625,7 @@ func sendToDLQ(w *kafka.Writer, msg *kafka.Message, reason string) {
 }
 
 // batchPrepareCollect получает пакеты данных о батчах, формирует их по COUNT_CLIENT штук и направляет на параллельную передачу в api
-func batchPrepareCollect(dlqWriter *kafka.Writer, preparesCh <-chan *PrepareBatch, collectCh chan<- []*PrepareBatch, wgPipe *sync.WaitGroup) {
+func batchPrepareCollect(preparesCh <-chan *PrepareBatch, collectCh chan<- []*PrepareBatch, wgPipe *sync.WaitGroup) {
 
 	defer wgPipe.Done()
 
@@ -1004,7 +1004,7 @@ func main() {
 	go consumer(ctx, errCh, endCh)
 
 	// ждём получения ошибки или nil из логики конвейера
-	// ошибки: нет возможности читать сообщения из брокера или нет возможности заполнять DLQ
+	// ошибки: нет возможности читать сообщения из брокера
 	err = <-errCh
 	if err != nil {
 		log.Printf("консумер завершился с критической ошибкой: %v", err)

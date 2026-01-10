@@ -3,15 +3,23 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/segmentio/kafka-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	tcKafka "github.com/testcontainers/testcontainers-go/modules/kafka"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
@@ -385,662 +393,212 @@ func TestExtractOrderUID(t *testing.T) {
 	}
 }
 
-/*
-// TestConsumerConnect проверяет только подключение к Kafka
-func TestConsumerConnect(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Пропускаем тест с Kafka в short режиме")
-	}
+func TestConsumPipelineIntegrations(t *testing.T) {
 
-	// Проверяем подключение к Kafka
-	kafkaHost := "localhost"
-	kafkaPort := "9092"
-	brokerAddr := fmt.Sprintf("%s:%s", kafkaHost, kafkaPort)
-
-	conn, err := kafka.Dial("tcp", brokerAddr)
-	if err != nil {
-		t.Skipf("Kafka недоступна: %v", err)
-		return
-	}
-	defer conn.Close()
-
-	// Проверяем, что можем получить список топиков
-	brokers, err := conn.Brokers()
-	if err != nil {
-		t.Skipf("Не удалось получить брокеров: %v", err)
-		return
-	}
-
-	t.Logf("Успешное подключение к Kafka. Брокеры: %v", brokers)
-
-	// Если дошли сюда - подключение работает
-	assert.NotEmpty(t, brokers, "Должен быть хотя бы один брокер")
-}
-*/
-
-/*
-// TestConsumerWithExistingTopic тестирует чтение/запись в существующий топик
-func TestConsumerWithExistingTopic(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Пропускаем тест в short режиме")
-	}
-
-	tracer = noop.NewTracerProvider().Tracer("test")
-
-	kafkaHost := "localhost"
-	kafkaPort := "9092"
-	brokerAddr := fmt.Sprintf("%s:%s", kafkaHost, kafkaPort)
-
-	// Проверяем, что топик "my-topic" существует
-	conn, err := kafka.Dial("tcp", brokerAddr)
-	if err != nil {
-		t.Skipf("Kafka недоступна: %v", err)
-		return
-	}
-	defer conn.Close()
-
-	// Получаем список топиков
-	partitions, err := conn.ReadPartitions()
-	if err != nil {
-		t.Skipf("Не удалось получить топики: %v", err)
-		return
-	}
-
-	// Ищем наш топик
-	topicExists := false
-	for _, p := range partitions {
-		if p.Topic == "my-topic" {
-			topicExists = true
-			break
-		}
-	}
-
-	if !topicExists {
-		// Создаем топик через kafka-topics.sh
-		cmd := exec.Command(
-			"docker", "exec", "kafka",
-			"/opt/kafka/bin/kafka-topics.sh",
-			"--bootstrap-server", "localhost:9092",
-			"--create",
-			"--topic", "my-topic",
-			"--partitions", "1",
-			"--replication-factor", "1",
-		)
-
-		if output, err := cmd.CombinedOutput(); err != nil {
-			t.Skipf("Не удалось создать топик 'my-topic': %v\nOutput: %s", err, string(output))
-			return
-		}
-		t.Logf("Топик 'my-topic' создан1111")
-		time.Sleep(1 * time.Second)
-	}
-
-	// Теперь тестируем запись и чтение
-	producer := &kafka.Writer{
-		Addr:     kafka.TCP(brokerAddr),
-		Topic:    "my-topic",
-		Balancer: &kafka.Hash{},
-	}
-	defer producer.Close()
-
-	// Отправляем тестовое сообщение
-	testUID := fmt.Sprintf("test-%d", time.Now().UnixNano())
-	testMsg := fmt.Sprintf(`{"order_uid": "%s", "test": true}`, testUID)
-
-	err = producer.WriteMessages(context.Background(), kafka.Message{
-		Key:   []byte(testUID),
-		Value: []byte(testMsg),
-	})
-
-	if err != nil {
-		t.Skipf("Не удалось отправить сообщение: %v", err)
-		return
-	}
-	t.Logf("Отправлено тестовое сообщение с OrderUID: %s", testUID)
-
-	// Читаем сообщение
-	groupID := fmt.Sprintf("test-group-%d", time.Now().UnixNano())
-	consumer := kafka.NewReader(kafka.ReaderConfig{
-		Brokers: []string{brokerAddr},
-		Topic:   "my-topic",
-		GroupID: groupID,
-		MaxWait: 5 * time.Second,
-	})
-	defer consumer.Close()
-
-	// Устанавливаем offset в начало
-	consumer.SetOffset(kafka.LastOffset)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	msg, err := consumer.FetchMessage(ctx)
-	if err != nil {
-		t.Skipf("Не удалось прочитать сообщение: %v", err)
-		return
-	}
-
-	// Проверяем, что прочитали именно наше сообщение
-	uid := extractOrderUID(msg.Value)
-	assert.Equal(t, testUID, uid, "OrderUID должен совпадать")
-	t.Logf("Успешно прочитано сообщение с OrderUID: %s", uid)
-
-	// Коммитим
-	if err := consumer.CommitMessages(ctx, msg); err != nil {
-		t.Logf("Ошибка коммита: %v", err)
-	}
-}
-*/
-
-// TestConsumerRead тестирует базовое чтение сообщений из кафки
-func TestConsumerRead(t *testing.T) {
-
-	if testing.Short() {
-		t.Skip("Пропускаем тест с Kafka в short режиме")
-	}
-
-	// инициализируем noop tracer для тестов
-	tracer = noop.NewTracerProvider().Tracer("test")
-
-	// используем переменную окружения или значение по умолчанию
-	kafkaHost := "localhost"
-	kafkaPort := os.Getenv("KAFKA_PORT_NUM")
-	if kafkaPort == "" {
-		kafkaPort = "9092"
-	}
-	brokerAddr := kafkaHost + ":" + kafkaPort
-
-	// задаём начальные условия
-	testTopic := "test-topic-read-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-	groupID := "test-group-read"
-
-	// подключаемся к брокеру и создаем топик
-	conn, err := kafka.DialLeader(context.Background(), "tcp", brokerAddr, testTopic, 0)
-	if err != nil {
-		t.Skipf("Не удалось подключиться к Kafka по адресу %s: %v. Пропускаем тест.", brokerAddr, err)
-		return
-	}
-	defer conn.Close()
-
-	// готовим продюсер
-	writer := kafka.NewWriter(kafka.WriterConfig{
-		Brokers: []string{brokerAddr},
-		Topic:   testTopic,
-	})
-	defer writer.Close()
-
-	// генерируем тестовые данные и сразу их отправляем
-	expectedCount := 5 // количество тестовых сообщений
-	for i := 0; i < expectedCount; i++ {
-		msg := []byte(fmt.Sprintf(`{"order_uid": "test-%d", "data": "test data %d"}`, i+1, i+1))
-		err := writer.WriteMessages(context.Background(), kafka.Message{
-			Key:   []byte(fmt.Sprintf("key-%d", i)),
-			Value: msg,
-		})
-		require.NoError(t, err, "Ошибка при отправке сообщения %d.", i+1)
-	}
-
-	// организуем консумер
-	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:  []string{brokerAddr},
-		Topic:    testTopic,
-		GroupID:  groupID,
-		MinBytes: 10,
-		MaxBytes: 10e6,
-		MaxWait:  2 * time.Second,
-	})
-	defer r.Close()
-
-	// вычитываем и считаем сообщения
-	counter := 0
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	for {
-		msg, err := r.FetchMessage(ctx)
-		if err != nil {
-			break // выходим когда больше нет сообщений или таймаут
-		}
-		counter++
-
-		// извлекаем order_uid для проверки
-		uid := extractOrderUID(msg.Value)
-		assert.NotEmpty(t, uid, "Сообщение %d должно содержать order_uid", counter)
-		assert.Equal(t, fmt.Sprintf("test-%d", counter), uid, "OrderUID должен совпадать")
-
-		// коммитим чтобы не читать повторно
-		if err := r.CommitMessages(ctx, msg); err != nil {
-			t.Logf("Ошибка при коммите сообщения %d: %v", counter, err)
-		}
-	}
-
-	assert.Equal(t, expectedCount, counter, "Количество прочитанных сообщений не совпадает.")
-
-	// очистка
-	t.Cleanup(func() {
-		conn, err := kafka.Dial("tcp", brokerAddr)
-		if err == nil {
-			conn.DeleteTopics(testTopic)
-			conn.Close()
-		}
-	})
-}
-
-// TestConsumerWithRealData - тест с реальными данными из примера
-func TestConsumerWithRealData(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Пропускаем тест с реальными данными в short режиме")
-	}
-
-	// Используем переменную окружения или значение по умолчанию
-	kafkaHost := os.Getenv("KAFKA_HOST")
-	if kafkaHost == "" {
-		kafkaHost = "localhost"
-	}
-	kafkaPort := os.Getenv("KAFKA_PORT")
-	if kafkaPort == "" {
-		kafkaPort = "9092"
-	}
-	brokerAddr := kafkaHost + ":" + kafkaPort
-
-	// Тестовые данные из примера
-	testOrder := []byte(`{
-		"order_uid": "b563feb7b2b84b6test",
-		"track_number": "WBILMTESTTRACK",
-		"entry": "WBIL",
-		"delivery": {
-			"name": "Test Testov",
-			"phone": "+9720000000",
-			"zip": "2639809",
-			"city": "Kiryat Mozkin",
-			"address": "Ploshad Mira 15",
-			"region": "Kraiot",
-			"email": "test@gmail.com"
-		},
-		"payment": {
-			"transaction": "b563feb7b2b84b6test",
-			"request_id": "",
-			"currency": "USD",
-			"provider": "wbpay",
-			"amount": 1817,
-			"payment_dt": 1637907727,
-			"bank": "alpha",
-			"delivery_cost": 1500,
-			"goods_total": 317,
-			"custom_fee": 0
-		},
-		"items": [
-			{
-				"chrt_id": 9934930,
-				"track_number": "WBILMTESTTRACK",
-				"price": 453,
-				"rid": "ab4219087a764ae0btest",
-				"name": "Mascaras",
-				"sale": 30,
-				"size": "0",
-				"total_price": 317,
-				"nm_id": 2389212,
-				"brand": "Vivienne Sabo",
-				"status": 202
-			}
-		],
-		"locale": "en",
-		"internal_signature": "",
-		"customer_id": "test",
-		"delivery_service": "meest",
-		"shardkey": "9",
-		"sm_id": 99,
-		"date_created": "2021-11-26T06:22:19Z",
-		"oof_shard": "1"
-	}`)
-
-	// создаем топик
-	testTopic := "test-real-data-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-	conn, err := kafka.DialLeader(context.Background(), "tcp", brokerAddr, testTopic, 0)
-	if err != nil {
-		t.Skipf("Не удалось подключиться к Kafka: %v", err)
-		return
-	}
-	defer conn.Close()
-
-	// записываем сообщение
-	writer := kafka.NewWriter(kafka.WriterConfig{
-		Brokers: []string{brokerAddr},
-		Topic:   testTopic,
-	})
-	defer writer.Close()
-
-	err = writer.WriteMessages(context.Background(), kafka.Message{
-		Key:   []byte("real-data-key"),
-		Value: testOrder,
-	})
-	require.NoError(t, err)
-
-	// читаем обратно
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:  []string{brokerAddr},
-		Topic:    testTopic,
-		GroupID:  "test-group-real",
-		MinBytes: 10,
-		MaxBytes: 10e6,
-		MaxWait:  2 * time.Second,
-	})
-	defer reader.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	msg, err := reader.ReadMessage(ctx)
-	require.NoError(t, err)
-
-	// проверяем данные
-	uid := extractOrderUID(msg.Value)
-	assert.Equal(t, "b563feb7b2b84b6test", uid, "OrderUID должен совпадать")
-
-	// проверяем что JSON валиден
-	var order map[string]interface{}
-	err = json.Unmarshal(msg.Value, &order)
-	assert.NoError(t, err, "JSON должен быть валидным")
-	assert.Equal(t, "Test Testov", order["delivery"].(map[string]interface{})["name"])
-	assert.Equal(t, "WBILMTESTTRACK", order["track_number"])
-
-	// очистка
-	t.Cleanup(func() {
-		conn, err := kafka.Dial("tcp", brokerAddr)
-		if err == nil {
-			conn.DeleteTopics(testTopic)
-			conn.Close()
-		}
-	})
-}
-
-/*
-// TestConsumerAPIIntegration тестирует интеграцию с API
-func TestConsumerAPIIntegration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Пропускаем интеграционный тест в short режиме")
 	}
 
-	// Используем переменную окружения или значение по умолчанию
-	kafkaHost := os.Getenv("KAFKA_HOST")
-	if kafkaHost == "" {
-		kafkaHost = "localhost"
-	}
-	kafkaPort := os.Getenv("KAFKA_PORT")
-	if kafkaPort == "" {
-		kafkaPort = "9092"
-	}
-	brokerAddr := kafkaHost + ":" + kafkaPort
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
-	// задаём начальные условия и тестовые данные
-	testTopic := "test-api-topic-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-	testGroupID := "test-api-group"
-	testDLQTopic := "test-api-dlq-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-
-	testMessages := []kafka.Message{
-		{
-			Key:   []byte("key-1"),
-			Value: []byte(`{"order_uid": "test-1", "data": "test1"}`),
-		},
-		{
-			Key:   []byte("key-2"),
-			Value: []byte(`{"order_uid": "test-2", "data": "test2"}`),
-		},
-		{
-			Key:   []byte("key-3"),
-			Value: []byte(`{"data": "invalid - no order_uid"}`), // невалидное
-		},
-	}
-
-	// создаём подключение и топики
-	conn, err := kafka.DialLeader(context.Background(), "tcp", brokerAddr, testTopic, 0)
-	if err != nil {
-		t.Skipf("Не удалось подключиться к Kafka по адресу %s: %v. Пропускаем тест.", brokerAddr, err)
-		return
-	}
-	defer conn.Close()
-
-	// создаем DLQ топик
-	dlqConn, err := kafka.DialLeader(context.Background(), "tcp", brokerAddr, testDLQTopic, 0)
-	require.NoError(t, err, "Не удалось создать DLQ топик")
-	dlqConn.Close()
-
-	// сохраняем оригинальные переменные окружения
-	originalEnv := map[string]string{
-		"TOPIC_NAME_STR":        "",
-		"GROUP_ID_NAME_STR":     "",
-		"DLQ_TOPIC_NAME_STR":    "",
-		"SERVICE_PORT":      "",
-		"TIME_LIMIT_CONSUMER_S": "",
-		"BATCH_SIZE_NUM":        "",
-		"WORKERS_COUNT":         "",
-	}
-
-	for envVar := range originalEnv {
-		if val, exists := os.LookupEnv(envVar); exists {
-			originalEnv[envVar] = val
-			defer os.Setenv(envVar, val)
-		} else {
-			defer os.Unsetenv(envVar)
+	// 1. Запускаем контейнер с тестовой кафкой (для дополнительного разнообразия берём образ, отличный от проектного)
+	kafkaContainer, err := tcKafka.Run(ctx, "confluentinc/confluent-local:7.5.0",
+		tcKafka.WithClusterID("test-cluster"))
+	defer func() {
+		if err := testcontainers.TerminateContainer(kafkaContainer); err != nil {
+			t.Logf("ошибка при остановке kafkaContainer в тесте: %v", err)
 		}
-		os.Unsetenv(envVar)
+	}()
+
+	require.NoError(t, err, "Не удалось запустить Kafka контейнер")
+
+	// 2. Получаем адрес брокера
+	brokers, err := kafkaContainer.Brokers(ctx)
+	require.NoError(t, err, "Не удалось получить адрес брокера")
+	require.NotEmpty(t, brokers, "Список брокеров пуст")
+
+	brokerAddr := brokers[0]
+	t.Logf("Kafka запущена на: %s", brokerAddr)
+
+	// задаём имена топиков
+	testTopic := "test-topic-consumer"
+	dlqTopic := "test-dlq-consumer"
+
+	// устанавливаем соединение с брокером и создаём топики
+	connTestTopic, err := kafka.DialLeader(context.Background(), "tcp", brokerAddr, testTopic, 0)
+	if err != nil {
+		t.Logf("ошибка создания тестового топика кафки в тесте: %v.\n", err)
 	}
+	defer func() {
+		// закрываем соединение testProduceConn
+		if err := connTestTopic.Close(); err != nil {
+			t.Logf("ошибка при закрытии соединения c тестовым топиком в тесте: %v.\n", err)
+		}
+	}()
+	connDLQTopic, err := kafka.DialLeader(context.Background(), "tcp", brokerAddr, dlqTopic, 0)
+	if err != nil {
+		t.Logf("ошибка создания тестового топика DLQ кафки в тесте: %v.\n", err)
+	}
+	defer func() {
+		// закрываем соединение testProduceConn
+		if err := connDLQTopic.Close(); err != nil {
+			t.Logf("ошибка при закрытии соединения с тестовым топиком DLQ в тесте: %v.\n", err)
+		}
+	}()
 
-	// создаем тестовый HTTP-сервер для API
-	var receivedRequests []string
+	// 4. Создаём тестовые сообщения (30 штук), каждое пятое без OrderUID (для DLQ)
+	testMessages := generateTestMessages(30)
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Читаем тело запроса
-		body, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
+	// 5. Отправляем сообщения в тестовый топик
+	writer := &kafka.Writer{
+		Addr:         kafka.TCP(brokerAddr),
+		Topic:        testTopic,
+		RequiredAcks: kafka.RequireAll,
+	}
+	defer func() {
+		if err := writer.Close(); err != nil {
+			t.Logf("ошибка при закрытии врайтера в тестовый топик Kafka в тесте: %v", err)
+		}
+	}()
 
-		// Сохраняем запрос для проверки
-		receivedRequests = append(receivedRequests, string(body))
+	err = writer.WriteMessages(ctx, testMessages...)
+	require.NoError(t, err, "Не удалось записать в кафку тестовые сообщения")
 
-		// Парсим запрос
+	t.Logf("Отправлено %d тестовых сообщений", len(testMessages))
+
+	// на этом ^ имитация продюсера завершена
+
+	// 6. Создаем тестовый API сервер
+	var apiRequests []string
+	var apiRequestsMu sync.Mutex
+	successCount := 0 // отправленные в API сообщения (с order_uid)
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiRequestsMu.Lock()
+		defer apiRequestsMu.Unlock()
+
+		// считываем сообщения из запроса и парсим
+		body, _ := io.ReadAll(r.Body)
+		apiRequests = append(apiRequests, string(body))
+
 		var messages []json.RawMessage
-		err = json.Unmarshal(body, &messages)
-		if err != nil {
+		if err := json.Unmarshal(body, &messages); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
-		// Формируем ответы
-		var responses []OrderResponse
-		for _, msgData := range messages {
+		// формируем ответы
+		responses := make([]OrderResponse, len(messages))
+		for i, msgData := range messages {
 			var data map[string]interface{}
 			json.Unmarshal(msgData, &data)
 
-			orderUID, hasUID := data["order_uid"].(string)
-
-			resp := OrderResponse{
-				OrderUID: orderUID,
-			}
-
-			if hasUID && orderUID != "" {
-				resp.Status = "success"
-				resp.ShouldCommit = true
-				resp.ShouldDLQ = false
+			orderUID, _ := data["order_uid"].(string)
+			status := "success"
+			if orderUID == "" {
+				status = "error"
 			} else {
-				resp.Status = "error"
-				resp.Message = "missing order_uid"
-				resp.ShouldCommit = false
-				resp.ShouldDLQ = true
+				successCount++
 			}
 
-			responses = append(responses, resp)
+			responses[i] = OrderResponse{
+				OrderUID: orderUID,
+				Status:   status,
+			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusMultiStatus)
 		json.NewEncoder(w).Encode(responses)
 	}))
-	defer ts.Close()
+	defer apiServer.Close()
 
-	// Получаем порт тестового сервера
-	u, err := url.Parse(ts.URL)
+	// на этом ^ имитация API сервиса завершена
+
+	// 7. Настраиваем конфиг для консумера
+	host, portStr, err := net.SplitHostPort(brokerAddr)
 	require.NoError(t, err)
-	portStr := u.Port()
-	require.NotEmpty(t, portStr, "Не удалось извлечь порт из URL: %s", ts.URL)
 	port, err := strconv.Atoi(portStr)
-	require.NoError(t, err, "Не удалось преобразовать порт '%s' в число", portStr)
+	require.NoError(t, err)
 
-	// Устанавливаем тестовые переменные окружения
-	os.Setenv("TOPIC_NAME_STR", testTopic)
-	os.Setenv("GROUP_ID_NAME_STR", testGroupID)
-	os.Setenv("DLQ_TOPIC_NAME_STR", testDLQTopic)
-	os.Setenv("SERVICE_PORT", strconv.Itoa(port))
-	os.Setenv("TIME_LIMIT_CONSUMER_S", "5") // 5 секунд
-	os.Setenv("BATCH_SIZE_NUM", "2")
-	os.Setenv("WORKERS_COUNT", "2")
+	apiPort, _ := strconv.Atoi(apiServer.URL[17:])
 
-	cfg = readConfig()
+	// сохраняем оригинальный конфиг
+	origCfg := cfg
+	defer func() { cfg = origCfg }()
 
-	// Корректируем глобальный cfg для теста
-	cfg.BatchTimeout = 100 * time.Millisecond
-	cfg.MaxRetries = 1
-	cfg.RetryDelayBase = 10 * time.Millisecond
-	cfg.ClientTimeout = 2 * time.Second
-	cfg.LimitConsumWork = 5 * time.Second
-
-	// Записываем тестовые сообщения в Kafka
-	writer := kafka.NewWriter(kafka.WriterConfig{
-		Brokers: []string{brokerAddr},
-		Topic:   testTopic,
-	})
-	defer writer.Close()
-
-	for _, msg := range testMessages {
-		err := writer.WriteMessages(context.Background(), msg)
-		require.NoError(t, err)
+	// меняем значения в конфиге на более соответствующие тестам
+	cfg = &ConsumerConfig{
+		Topic:          testTopic,
+		GroupID:        "test-group",
+		KafkaHost:      host,
+		KafkaPort:      port,
+		ServiceHost:    "127.0.0.1",
+		ServicePort:    apiPort,
+		BatchSize:      5,
+		BatchTimeout:   100 * time.Millisecond,
+		MaxRetries:     1,
+		RetryDelayBase: 50 * time.Millisecond,
+		CountClient:    2,
+		ClientTimeout:  2 * time.Second,
+		DlqTopic:       dlqTopic,
 	}
 
-	// Запускаем консумер в отдельной горутине
-	done := make(chan bool)
+	// 8. Инициализируем noop tracer
+	tracer = noop.NewTracerProvider().Tracer("test")
 
-	// В тесте вместо оригинального consumer запускаем:
-	go func() {
-		defer func() { done <- true }()
-
-		// Запускаем почти консумер
-		runTestConsumer(brokerAddr, testTopic, testGroupID, testDLQTopic)
-	}()
-
-	// Ждем завершения консумера
-	select {
-	case <-done:
-		t.Log("Консумер завершил работу")
-	case <-time.After(10 * time.Second):
-		t.Log("Таймаут ожидания консумера")
-	}
-
-	// Проверяем результаты
-	if len(receivedRequests) > 0 {
-		// Проверяем что валидные сообщения были отправлены в API
-		foundValid1 := false
-		foundValid2 := false
-
-		for _, req := range receivedRequests {
-			if bytes.Contains([]byte(req), []byte("test-1")) {
-				foundValid1 = true
-			}
-			if bytes.Contains([]byte(req), []byte("test-2")) {
-				foundValid2 = true
-			}
-		}
-
-		// Логируем результат
-		if foundValid1 {
-			t.Log("✓ Сообщение test-1 отправлено в API")
-		}
-		if foundValid2 {
-			t.Log("✓ Сообщение test-2 отправлено в API")
-		}
-	} else {
-		t.Log("API не было вызвано (возможно, консумер не успел обработать сообщения)")
-	}
-
-	// Проверяем DLQ
-	dlqReader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:   []string{brokerAddr},
-		Topic:     testDLQTopic,
-		Partition: 0,
-		MinBytes:  10,
-		MaxBytes:  10e6,
-		MaxWait:   1 * time.Second,
-	})
-	defer dlqReader.Close()
-
-	dlqCtx, dlqCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer dlqCancel()
-
-	dlqCount := 0
-	for {
-		msg, err := dlqReader.ReadMessage(dlqCtx)
-		if err != nil {
-			break
-		}
-		dlqCount++
-		dlqReader.CommitMessages(dlqCtx, msg)
-	}
-
-	// Ожидаем 1 сообщение в DLQ (невалидное)
-	if dlqCount > 0 {
-		assert.Equal(t, 1, dlqCount, "Должно быть 1 невалидное сообщение в DLQ")
-		t.Logf("✓ Найдено %d сообщений в DLQ", dlqCount)
-	} else {
-		t.Log("В DLQ не найдено сообщений (возможно, не успели обработаться)")
-	}
-
-	// Очистка
-	t.Cleanup(func() {
-		conn, err := kafka.Dial("tcp", brokerAddr)
-		if err == nil {
-			conn.DeleteTopics(testTopic, testDLQTopic)
-			conn.Close()
-		}
-	})
-}
-
-// runTestConsumer - запускает консумер с исправленной конфигурацией для теста
-func runTestConsumer(brokerAddr, topic, groupID, dlqTopic string) {
-
-	// Создаем контекст
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Создаем ридер
-	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:  []string{fmt.Sprintf("%s:%d", cfg.KafkaHost, cfg.KafkaPort)},
-		Topic:    cfg.Topic,
-		GroupID:  cfg.GroupID,
-		MinBytes: 10000,  // минимальный пакет
-		MaxBytes: 500000, // максимальный пакет батчей
-	})
-	defer r.Close()
-
-	// Создаем DLQ writer
+	// 9. Создаём врайтер для записи в DLQ
 	dlqWriter := &kafka.Writer{
 		Addr:  kafka.TCP(brokerAddr),
-		Topic: dlqTopic,
+		Topic: cfg.DlqTopic,
 	}
-	defer dlqWriter.Close()
+	defer func() {
+		if err := dlqWriter.Close(); err != nil {
+			t.Logf("ошибка при закрытии dlqWriter в тесте: %v", err)
+		}
+	}()
 
-	// Каналы
-	messagesCh := make(chan *MessageWithTrace, cfg.BatchSize*10)
-	batchesCh := make(chan []*MessageWithTrace, cfg.BatchSize/4)
-	preparesCh := make(chan *PrepareBatch, cfg.BatchSize/4)
-	collectCh := make(chan []*PrepareBatch, cfg.BatchSize/4)
-	responsesCh := make(chan *RespBatchInfo, cfg.BatchSize/4)
-	endCh := make(chan struct{})
+	// 10. Создаём ридер из тестового топика
+	r := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:  []string{brokerAddr},
+		Topic:    cfg.Topic,
+		GroupID:  cfg.GroupID,
+		MinBytes: 10,
+		MaxBytes: 10e6,
+	})
+	defer func() {
+		if err := r.Close(); err != nil {
+			t.Logf("ошибка при закрытии ридера Kafka в тесте: %v", err)
+		}
+	}()
+
+	// 11. Организуем каналы
+	messagesCh := make(chan *MessageWithTrace, cfg.BatchSize*10) // канал для входящих сообщений с большим буфером
+	batchesCh := make(chan []*MessageWithTrace, cfg.BatchSize/4) // канал для передачи батчей на обработку
+	preparesCh := make(chan *PrepareBatch, cfg.BatchSize/4)      // канал для передачи подготовленной информации к отправке в api
+	collectCh := make(chan []*PrepareBatch, cfg.BatchSize/4)     // канал скомпанованных данных о батчах для параллельной передачи в api
+	responsesCh := make(chan *RespBatchInfo, cfg.BatchSize/4)    // канал передачи ответов по батчам и мап с сообщениями
+
+	// канал для передачи ошибки ридера при чтении сообщений из кафки
 	errCh := make(chan error)
+	// канал для передачи сигнала об окончании обработки сообщений
+	endCh := make(chan struct{})
 
-	// Запускаем пайплайн
+	time.Sleep(3 * time.Second) // тут надо просто дождаться записи сообщений в тестовый топик
+
+	// 12. Запускаем конвейер (собственно, сам этот ужасный тест)
+
+	// чтение прекращается через пару секунд - для тестового количества сообщений достаточно
+	ctxPipe, pipeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer pipeCancel()
+
+	// wgPipe для ожидания всех горутин конвейера
 	var wgPipe sync.WaitGroup
 
 	// 1. читаем сообщения из кафки
 	wgPipe.Add(1)
-	go readMsgOfKafka(ctx, r, messagesCh, errCh, &wgPipe)
+	go readMsgOfKafka(ctxPipe, r, messagesCh, errCh, &wgPipe)
 
 	// 2. комплектуем батчи из прочитанных сообщений
 	wgPipe.Add(1)
@@ -1052,7 +610,7 @@ func runTestConsumer(brokerAddr, topic, groupID, dlqTopic string) {
 
 	// 4. собираем данные по батчам в группы для параллельной отправки в api
 	wgPipe.Add(1)
-	go batchPrepareCollect(dlqWriter, preparesCh, collectCh, &wgPipe)
+	go batchPrepareCollect(preparesCh, collectCh, &wgPipe)
 
 	// 5. параллельно направляем запросы в api по группе батчей
 	wgPipe.Add(1)
@@ -1062,22 +620,102 @@ func runTestConsumer(brokerAddr, topic, groupID, dlqTopic string) {
 	wgPipe.Add(1)
 	go processBatchResponse(r, dlqWriter, responsesCh, endCh, &wgPipe)
 
-	// Ждем завершения всех этапов
-	wgPipe.Wait()
-}
-*/
+	// close(errCh) уже выполнился при выходе из readMsgOfKafka
+	// close(endCh) уже выполнился при выходе из processBatchResponse
 
-// isKafkaAvailable проверяет доступность Kafka
-func isKafkaAvailable(brokerAddr string) bool {
+	// 13. Ждём завершения работы конвейера
+	go func() {
+		wgPipe.Wait()
+	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	conn, err := kafka.DialContext(ctx, "tcp", brokerAddr)
-	if err != nil {
-		return false
+	// ждём получения ошибки или nil из логики конвейера
+	// ошибки: нет возможности читать сообщения из брокера
+	err = <-errCh
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		t.Logf("конвейер завершился с критической ошибкой в тесте: %v", err)
+		pipeCancel()
 	}
-	defer conn.Close()
 
-	return true
+	<-endCh // завершился последний воркер в конвейере обработки
+
+	if err == nil {
+		t.Log("Конвейер корректно завершил работу в тесте.")
+	}
+
+	// 14. Проверяем результаты
+	apiRequestsMu.Lock()
+	t.Logf("API получило %d запросов", len(apiRequests))
+	t.Logf("Успешно обработано сообщений: %d", successCount)
+	apiRequestsMu.Unlock()
+
+	// проверяем сообщения в DLQ
+	dlqReader := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:  []string{brokerAddr},
+		Topic:    cfg.DlqTopic,
+		GroupID:  cfg.GroupID + "dlq",
+		MinBytes: 1,
+		MaxBytes: 10e6,
+	})
+	defer func() {
+		if err := dlqReader.Close(); err != nil {
+			t.Logf("ошибка при закрытии dlqReader в тесте: %v\n", err)
+		}
+	}()
+
+	var dlqMessages []kafka.Message
+	dlqCtx, dlqCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer dlqCancel()
+
+	for {
+		msg, err := dlqReader.FetchMessage(dlqCtx)
+		if err != nil {
+			break
+		}
+		dlqMessages = append(dlqMessages, msg)
+		dlqReader.CommitMessages(ctx, msg)
+	}
+
+	dlqCount := len(dlqMessages)
+	t.Logf("В DLQ находится %d сообщений", dlqCount)
+
+	// проверяем, что невалидные сообщения попали в DLQ
+	expectedDLQCount := 0
+	for i := 0; i < len(testMessages); i++ {
+		if (i+1)%5 == 0 {
+			expectedDLQCount++
+		}
+	}
+
+	assert.Equal(t, expectedDLQCount, dlqCount, "Количество сообщений в DLQ должно совпадать с ожидаемым (каждое 5-е)")
+
+	// Проверяем, что API получило только валидные сообщения
+	expectedAPICount := len(testMessages) - expectedDLQCount // 30 - 30/5 = 24 сообщения
+	assert.Equal(t, expectedAPICount, successCount, "API должно было получить только валидные сообщения")
+
+	t.Log("Тест конвейера потребителя завершен успешно")
+}
+
+// generateTestMessages создает тестовые сообщения для Kafka
+func generateTestMessages(total int) []kafka.Message {
+
+	messages := make([]kafka.Message, total)
+
+	for i := 0; i < total; i++ {
+
+		var message []byte
+
+		if (i+1)%5 == 0 {
+			// каждое 5-е сообщение будет без order_uid (для тестирования DLQ)
+			message = []byte(fmt.Sprintf(`{"order_uid": "", "data": "message-%d", "error": "no order uid"}`, i+1))
+		} else {
+			message = []byte(fmt.Sprintf(`{"order_uid": "test-%d", "data": "message-%d", "valid": true}`, i+1, i+1))
+		}
+
+		messages[i] = kafka.Message{
+			Key:   []byte(fmt.Sprintf("key-%d", i+1)),
+			Value: message,
+		}
+	}
+
+	return messages
 }
