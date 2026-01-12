@@ -22,6 +22,7 @@ import (
 	// для трейсинга
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -115,9 +116,15 @@ const (
 	dlqTopicConst       = "my-topic-DLQ" // топик для DLQ
 )
 
+// MessageForAPI структура для передачи трейса в api
+type MessageForAPI struct {
+	Data        json.RawMessage `json:"data"`
+	Traceparent string          `json:"traceparent,omitempty"`
+}
+
 // PrepareBatch структура для параллельной отправки ограниченного величиной COUNT_CLIENT количества батчей в api
 type PrepareBatch struct {
-	batchMessage     []json.RawMessage            // указатели на подготовленные к отправке в api сообщения
+	batchMessages    []MessageForAPI              // указатели на подготовленные к отправке в api сообщения с трейсами
 	messageByUID     map[string]*MessageWithTrace // мапа идентификации [orderUID]->MessageWithTrace
 	lastBatchMessage *kafka.Message               // указатель на последнее сообщение в батче, чтобы коммитить весь батч, так как порядок сообщений в батче сохраняется
 }
@@ -496,6 +503,15 @@ func complectBatches(messagesCh <-chan *MessageWithTrace, batchesCh chan<- []*Me
 	}
 }
 
+// extractTraceparent извлекает traceparent из контекста
+func extractTraceparent(ctx context.Context) string {
+
+	carrier := propagation.HeaderCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
+
+	return carrier.Get("traceparent")
+}
+
 // prepareBatchToSending подготавливает информацию по батчу к отправке в api
 func prepareBatchToSending(dlqWriter *kafka.Writer, batchesCh <-chan []*MessageWithTrace, preparesCh chan<- *PrepareBatch, wgPipe *sync.WaitGroup) {
 
@@ -528,7 +544,7 @@ func prepareBatchToSending(dlqWriter *kafka.Writer, batchesCh <-chan []*MessageW
 		inMsgCounter += len(batch) // подсчитываем пришедшие сообщения
 
 		// подготавливаем данные для API
-		jsonMessages := make([]json.RawMessage, 0, len(batch))       // "тела" сообщений
+		batchMessages := make([]MessageForAPI, 0, len(batch))
 		messageMap := make(map[string]*MessageWithTrace, len(batch)) // мапа идентификации [orderUID]->*MessageWithTrace
 
 		for i := range batch {
@@ -547,7 +563,11 @@ func prepareBatchToSending(dlqWriter *kafka.Writer, batchesCh <-chan []*MessageW
 			// извлекаем orderUID для маппинга
 			if orderUID := extractOrderUID(batch[i].Message.Value); orderUID != "" {
 				messageMap[orderUID] = batch[i]
-				jsonMessages = append(jsonMessages, batch[i].Message.Value)
+				// создаем MessageForAPI с traceparent
+				batchMessages = append(batchMessages, MessageForAPI{
+					Data:        batch[i].Message.Value,
+					Traceparent: extractTraceparent(batch[i].Ctx), // извлекаем traceparent
+				})
 			} else {
 				// при отсутствии идентификатора сообщение шлём в DLQ
 				msgInDLQ++
@@ -556,11 +576,11 @@ func prepareBatchToSending(dlqWriter *kafka.Writer, batchesCh <-chan []*MessageW
 		}
 
 		// метрика для этапа подготовки
-		consumerStageMessages.WithLabelValues("prepared").Add(float64(len(jsonMessages)))
+		consumerStageMessages.WithLabelValues("prepared").Add(float64(len(batchMessages)))
 
 		// результат подготовки упаковываем в структуру
 		prepareBatch := &PrepareBatch{
-			batchMessage:     jsonMessages,
+			batchMessages:    batchMessages,
 			messageByUID:     messageMap,
 			lastBatchMessage: batch[len(batch)-1].Message,
 		}
@@ -680,7 +700,7 @@ func batchPrepareCollect(preparesCh <-chan *PrepareBatch, collectCh chan<- []*Pr
 			}
 
 			inBatchInfoCounter++
-			inMsgCounter += len(prepareBatch.batchMessage)
+			inMsgCounter += len(prepareBatch.batchMessages)
 
 			// создаем span для этапа сбора для каждого сообщения в батче
 			for _, wrappedMsg := range prepareBatch.messageByUID {
@@ -750,59 +770,83 @@ func sendBatchInfo(dlqWriter *kafka.Writer, collectCh <-chan []*PrepareBatch, re
 		// запускаем пулл воркеров для отправки запросов по батчам в api
 		for i := 0; i < len(packInfo); i++ {
 			wgSend.Add(1)
-			go func() {
+			go func(idx int) {
 				defer wgSend.Done()
 
 				atomic.AddInt64(&batchInfoCounter, 1)
-				atomic.AddInt64(&counterMsg, int64(len(packInfo[i].batchMessage)))
+				atomic.AddInt64(&counterMsg, int64(len(packInfo[idx].batchMessages)))
 
-				// Создаем spans для этапа отправки для каждого сообщения
-				for _, wrappedMsg := range packInfo[i].messageByUID {
+				for _, wrappedMsg := range packInfo[idx].messageByUID {
 					if wrappedMsg != nil {
 						sendCtx, _ := tracer.Start(wrappedMsg.Ctx, "consumer.pipeline.stage",
 							trace.WithAttributes(
 								attribute.String("stage", "sending"),
 								attribute.String("api.url", apiURL),
 							))
-						wrappedMsg.Ctx = sendCtx
+						wrappedMsg.Ctx = sendCtx // обновляем контекст
 					}
 				}
 
-				// метрика для этапа отправки
-				consumerStageMessages.WithLabelValues("sent").Add(float64(len(packInfo[i].batchMessage)))
+				// метрика этапа отправки
+				consumerStageMessages.WithLabelValues("sent").Add(float64(len(packInfo[idx].batchMessages)))
 
-				// формируем тело запроса
-				requestBody, err := json.Marshal(packInfo[i].batchMessage)
+				// сериализуем batchMessages (уже содержат traceparent)
+				requestBody, err := json.Marshal(packInfo[idx].batchMessages)
 				if err != nil {
 					log.Printf("ошибка сериализации: %v\n", err)
-					// если не можем сформировать запрос на основании данных по батчу, отправляем сообщения батча в DLQ
-					for _, wrappedMsg := range packInfo[i].messageByUID {
+					for _, wrappedMsg := range packInfo[idx].messageByUID {
 						atomic.AddInt64(&msgInDLQ, 1)
 						sendToDLQ(dlqWriter, wrappedMsg.Message, err.Error())
 					}
 					return
 				}
 
+				// берём контекст первого сообщения для создания HTTP запроса
+				var traceCtx context.Context
+				for _, wrappedMsg := range packInfo[idx].messageByUID {
+					traceCtx = wrappedMsg.Ctx
+					break
+				}
+				if traceCtx == nil {
+					traceCtx = context.Background()
+				}
+
+				// создаём span для HTTP запроса
+				httpCtx, httpSpan := tracer.Start(traceCtx, "consumer.http.request",
+					trace.WithAttributes(
+						attribute.String("api.url", apiURL),
+						attribute.Int("batch.size", len(packInfo[idx].batchMessages)),
+					))
+				defer httpSpan.End()
+
 				// с повторами отправляем батч в api
 				for attempt := 1; attempt <= cfg.MaxRetries; attempt++ {
 
 					requestStart := time.Now() // засекаем время
 
-					// направляем запрос
-					resp, err := client.Post(apiURL, "application/json", bytes.NewReader(requestBody))
+					// создаём запрос с контекстом
+					req, err := http.NewRequestWithContext(httpCtx, "POST", apiURL, bytes.NewReader(requestBody))
+					if err != nil {
+						log.Printf("Ошибка создания запроса (попытка %d/%d): %v.\n", attempt, cfg.MaxRetries, err)
+						continue
+					}
+					req.Header.Set("Content-Type", "application/json")
 
-					// метрика времени ответа API
+					// инжектируем трейс из httpCtx в заголовки
+					otel.GetTextMapPropagator().Inject(httpCtx, propagation.HeaderCarrier(req.Header))
+
+					// направляем запрос
+					resp, err := client.Do(req)
+
+					// метрика времени ответа
 					if err == nil && resp != nil {
 						duration := time.Since(requestStart).Seconds()
 						consumerApiResponseTime.Observe(duration)
 					}
 
 					if err != nil {
-						log.Printf("Ошибка сети (попытка %d/%d): %v", attempt, cfg.MaxRetries, err)
-
-						// проверяем номер попытки и делаем паузу перед следующей попыткой
+						log.Printf("Ошибка сети (попытка %d/%d): %v.\n", attempt, cfg.MaxRetries, err)
 						if attempt < cfg.MaxRetries {
-							// делаем увеличивающуюся паузу (200ms, 600ms, 1200ms)
 							delay := cfg.RetryDelayBase * time.Duration(attempt*attempt+attempt) * time.Millisecond
 							time.Sleep(delay)
 						}
@@ -823,7 +867,7 @@ func sendBatchInfo(dlqWriter *kafka.Writer, collectCh <-chan []*PrepareBatch, re
 						var responsInfo []OrderResponse
 						if err := json.Unmarshal(body, &responsInfo); err != nil {
 							// если ответ не парсится => батч в DLQ
-							for _, wrappedMsg := range packInfo[i].messageByUID {
+							for _, wrappedMsg := range packInfo[idx].messageByUID {
 								atomic.AddInt64(&msgInDLQ, 1)
 								sendToDLQ(dlqWriter, wrappedMsg.Message, err.Error())
 							}
@@ -835,12 +879,19 @@ func sendBatchInfo(dlqWriter *kafka.Writer, collectCh <-chan []*PrepareBatch, re
 						atomic.AddInt64(&inRespCounter, 1)
 						atomic.AddInt64(&inRespMsgCounter, int64(len(responsInfo)))
 
+						// обновляем span HTTP запроса
+						httpSpan.SetAttributes(
+							attribute.Int("http.status_code", resp.StatusCode),
+							attribute.Int("attempt", attempt),
+						)
+						httpSpan.SetStatus(codes.Ok, "success")
+
 						// объединяем ответ по батчу и мапу [orderUID]->MessageWithTrace в структуру
 						// и шлём в канал для обработки в processBatchResponse
 						respBatchInfo := &RespBatchInfo{
 							respOfBatch:      responsInfo,
-							messageByUID:     packInfo[i].messageByUID,
-							lastBatchMessage: packInfo[i].lastBatchMessage,
+							messageByUID:     packInfo[idx].messageByUID,
+							lastBatchMessage: packInfo[idx].lastBatchMessage,
 						}
 						responsesCh <- respBatchInfo
 
@@ -858,11 +909,12 @@ func sendBatchInfo(dlqWriter *kafka.Writer, collectCh <-chan []*PrepareBatch, re
 				}
 
 				// если за повторы не получилось отправить запрос в api, то отправляем всё в DLQ
-				for _, wrappedMsg := range packInfo[i].messageByUID {
+				for _, wrappedMsg := range packInfo[idx].messageByUID {
 					atomic.AddInt64(&msgInDLQ, 1)
-					sendToDLQ(dlqWriter, wrappedMsg.Message, err.Error())
+					sendToDLQ(dlqWriter, wrappedMsg.Message, "max retries exceeded")
 				}
-			}()
+				httpSpan.SetStatus(codes.Error, "all retries failed")
+			}(i)
 		}
 
 		// ждём окончания работы по всей группе батчей
