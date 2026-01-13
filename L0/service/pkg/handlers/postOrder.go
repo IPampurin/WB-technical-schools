@@ -2,12 +2,21 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/cache"
 	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
@@ -16,15 +25,44 @@ import (
 	"gorm.io/gorm"
 )
 
+// прометеус метрики для сервиса
+var (
+	// RPS сервиса (обработанные сообщения) - как в продюсере messagesSent
+	// -   RPS: rate(service_messages_processed_total[1m])
+	// - Total: service_messages_processed_total
+	serviceMessagesProcessed = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "service_messages_processed_total",
+		Help: "Количество обработанных сообщений в сервисе",
+	})
+
+	// время работы с БД - аналогично consumerApiResponseTime
+	// - Среднее время: avg(rate(service_db_operation_duration_seconds_sum[5m])) / avg(rate(service_db_operation_duration_seconds_count[5m]))
+	// - 95-й перцентиль: histogram_quantile(0.95, sum(rate(service_db_operation_duration_seconds_bucket[5m])) by (le))
+	// - 99-й перцентиль: histogram_quantile(0.99, sum(rate(service_db_operation_duration_seconds_bucket[5m])) by (le))
+	serviceDBDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "service_db_operation_duration_seconds",
+		Help:    "Время выполнения операций с базой данных",
+		Buckets: []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1},
+	})
+)
+
+// IncomingMessage структура для входящих сообщений от консумера
+type IncomingMessage struct {
+	Data        json.RawMessage `json:"data"`        // данные заказа
+	Traceparent string          `json:"traceparent"` // Traceparent для трейсинга
+}
+
 // OrderResponse структура для ответов по каждому сообщению в батче от консумера
 type OrderResponse struct {
-	OrderUID string `json:"order_uid"`         // идентификатор сообщения
-	Status   string `json:"status"`            // статус: "success", "conflict", "badRequest" (в DLQ), "error" (в DLQ)
-	Message  string `json:"message,omitempty"` // информация об ошибке
+	OrderUID   string `json:"order_uid"`         // идентификатор сообщения
+	Status     string `json:"status"`            // статус: "success", "conflict", "badRequest" (в DLQ), "error" (в DLQ)
+	MessageErr string `json:"message,omitempty"` // информация об ошибке
 }
 
 // PostOrder принимает json с информацией о заказе и сохраняет данные в базе
 func PostOrder(w http.ResponseWriter, r *http.Request) {
+
+	startTime := time.Now()
 
 	// проверяем не останавливается ли сервер
 	if shutdown.IsShuttingDown() {
@@ -32,41 +70,107 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var orders []*models.Order
+	// извлекаем контекст трейсинга из HTTP заголовков (для общего span батча)
+	ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+
+	// создаем span для обработки всего батча
+	ctx, batchSpan := otel.Tracer("order-service").Start(ctx, "service.order.batch",
+		trace.WithAttributes(
+			attribute.String("component", "order-service"),
+			attribute.String("http.method", r.Method),
+			attribute.String("http.url", r.URL.Path),
+		))
+	defer batchSpan.End()
+
 	var buf bytes.Buffer
 
 	// читаем тело запроса
 	_, err := buf.ReadFrom(r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		batchSpan.SetStatus(codes.Error, "Ошибка чтения тела запроса")
 		return
 	}
 
-	// парсим json из запроса в структуру заказа
-	if err = json.Unmarshal(buf.Bytes(), &orders); err != nil {
-		log.Printf("ошибка парсинга входящих данных в структуру обработчика: %v.\n", err)
-		http.Error(w, "Ожидается JSON массив заказов", http.StatusBadRequest)
+	// приводим поступившие данные к единому формату
+	incomingMessages, err := parseIncomingData(buf.Bytes())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// если нет заказов
-	if len(orders) == 0 {
+	// если нет сообщений
+	if len(incomingMessages) == 0 {
 		log.Println("Поступил пустой массив заказов в обработчик.")
 		http.Error(w, "Пустой массив заказов", http.StatusBadRequest)
+		batchSpan.SetStatus(codes.Error, "Пустой массив сообщений")
 		return
 	}
 
-	log.Printf("Получено %d заказов для обработки", len(orders))
+	// добавляем атрибуты о размере батча
+	batchSpan.SetAttributes(
+		attribute.Int("batch.size", len(incomingMessages)),
+	)
 
-	// подготавливаем данные для групповых проверок
-	orderUIDs := make([]string, len(orders))
+	log.Printf("Получено %d заказов для обработки", len(incomingMessages))
+
+	// парсим данные и извлекаем orderUID для каждого сообщения
+	orders := make([]*models.Order, 0, len(incomingMessages))
+	orderUIDs := make([]string, 0, len(incomingMessages))
 	orderMap := make(map[string]*models.Order) // для быстрого доступа по orderUID
-	cacheKeys := make([]string, len(orders))
+	cacheKeys := make([]string, 0, len(incomingMessages))
 
-	for i, order := range orders {
-		orderUIDs[i] = order.OrderUID
-		orderMap[order.OrderUID] = order
-		cacheKeys[i] = fmt.Sprintf("order:%s", order.OrderUID)
+	// массив для сохранения spans каждого сообщения
+	messageSpans := make([]trace.Span, len(incomingMessages))
+
+	for i, incomingMsg := range incomingMessages {
+
+		var order models.Order
+
+		// парсим данные заказа
+		if err := json.Unmarshal(incomingMsg.Data, &order); err != nil {
+			log.Printf("Ошибка парсинга данных заказа %d: %v", i, err)
+			continue
+		}
+
+		// извлекаем traceparent из сообщения и создаем контекст для трейсинга
+		var msgCtx context.Context
+		if incomingMsg.Traceparent != "" {
+			carrier := propagation.HeaderCarrier{}
+			carrier.Set("traceparent", incomingMsg.Traceparent)
+			msgCtx = otel.GetTextMapPropagator().Extract(ctx, carrier)
+		} else {
+			msgCtx = ctx
+		}
+
+		// создаем span для обработки этого сообщения
+		msgCtx, msgSpan := otel.Tracer("order-service").Start(msgCtx, "service.order.process",
+			trace.WithAttributes(
+				attribute.String("order.uid", order.OrderUID),
+				attribute.Int("message.index", i),
+			))
+		messageSpans[i] = msgSpan
+
+		orders = append(orders, &order)
+		orderUIDs = append(orderUIDs, order.OrderUID)
+		orderMap[order.OrderUID] = &order
+		cacheKeys = append(cacheKeys, fmt.Sprintf("order:%s", order.OrderUID))
+	}
+
+	// обеспечиваем завершение всех spans сообщений
+	defer func() {
+		for i := range messageSpans {
+			if messageSpans[i] != nil {
+				messageSpans[i].End()
+			}
+		}
+	}()
+
+	// Если не удалось распарсить ни одного заказа
+	if len(orders) == 0 {
+		http.Error(w, "Не удалось распарсить ни одного заказа", http.StatusBadRequest)
+		batchSpan.SetStatus(codes.Error, "Не удалось распарсить ни одного заказа")
+		return
 	}
 
 	// групповая проверка валидации
@@ -126,9 +230,9 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		// проверяем валидацию
 		if err, ok := validationResults[orderUID]; ok {
 			responses[i] = OrderResponse{
-				OrderUID: orderUID,
-				Status:   "badRequest",
-				Message:  err.Error(),
+				OrderUID:   orderUID,
+				Status:     "badRequest",
+				MessageErr: err.Error(),
 			}
 			continue
 		}
@@ -136,9 +240,9 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		// проверяем дубликаты в кэше
 		if cacheDuplicates[orderUID] {
 			responses[i] = OrderResponse{
-				OrderUID: orderUID,
-				Status:   "conflict",
-				Message:  "заказ уже существует в кэше",
+				OrderUID:   orderUID,
+				Status:     "conflict",
+				MessageErr: "заказ уже существует в кэше",
 			}
 			continue
 		}
@@ -146,9 +250,9 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		// проверяем дубликаты в БД
 		if dbDuplicates[orderUID] {
 			responses[i] = OrderResponse{
-				OrderUID: orderUID,
-				Status:   "conflict",
-				Message:  "заказ уже существует в базе",
+				OrderUID:   orderUID,
+				Status:     "conflict",
+				MessageErr: "заказ уже существует в базе",
 			}
 			continue
 		}
@@ -179,12 +283,22 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		if resp.Status == "" {
 			// если статус пустой, значит что-то пошло не так
 			responses[i] = OrderResponse{
-				OrderUID: orders[i].OrderUID,
-				Status:   "error",
-				Message:  "неизвестная ошибка обработки",
+				OrderUID:   orders[i].OrderUID,
+				Status:     "error",
+				MessageErr: "неизвестная ошибка обработки",
 			}
 		}
 	}
+
+	// после обработки всех заказов обновляем метрики
+	serviceMessagesProcessed.Add(float64(len(orders)))
+	duration := time.Since(startTime).Seconds()
+	serviceDBDuration.Observe(duration)
+
+	batchSpan.SetAttributes(
+		attribute.Float64("batch.duration_seconds", duration),
+		attribute.Int("batch.orders_count", len(orders)),
+	)
 
 	// определяем общий HTTP статус
 	allSuccess := true
@@ -217,6 +331,41 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		successCount, conflictCount, errorCount)
 }
 
+// parseIncomingData помогает распарсить входящие данные, так как от консумера
+// приходят структуры с трейсом, а из веб-интерфейса - json
+func parseIncomingData(data []byte) ([]IncomingMessage, error) {
+
+	// пробуем парсить как массив IncomingMessage (формат от консумера)
+	var messages []IncomingMessage
+	if err := json.Unmarshal(data, &messages); err == nil {
+		// проверяем, что есть поле Data
+		if len(messages[0].Data) != 0 {
+			return messages, nil
+		}
+	}
+
+	// если не получилось, пробуем парсить как массив Order (формат от веб-интерфейса)
+	var orders []models.Order
+	if err := json.Unmarshal(data, &orders); err != nil {
+		return nil, fmt.Errorf("не удалось распарсить данные: %v", err)
+	}
+
+	// конвертируем в IncomingMessage
+	result := make([]IncomingMessage, len(orders))
+	for i, order := range orders {
+		orderJSON, err := json.Marshal(order)
+		if err != nil {
+			return nil, fmt.Errorf("ошибка маршалинга заказа: %v", err)
+		}
+		result[i] = IncomingMessage{
+			Data:        orderJSON,
+			Traceparent: "", // нет traceparent от веб-интерфейса
+		}
+	}
+
+	return result, nil
+}
+
 // saveOrdersBatch сохраняет заказы пачкой в транзакции
 func saveOrdersBatch(orders []*models.Order) map[string]OrderResponse {
 
@@ -225,6 +374,12 @@ func saveOrdersBatch(orders []*models.Order) map[string]OrderResponse {
 	if len(orders) == 0 {
 		return results
 	}
+
+	startTime := time.Now()
+	defer func() {
+		duration := time.Since(startTime).Seconds()
+		serviceDBDuration.Observe(duration)
+	}()
 
 	log.Printf("Начинаем транзакцию для сохранения %d заказов.", len(orders))
 	tx := db.DB.Db.Begin()
@@ -235,9 +390,9 @@ func saveOrdersBatch(orders []*models.Order) map[string]OrderResponse {
 			// помечаем все заказы как ошибки
 			for _, order := range orders {
 				results[order.OrderUID] = OrderResponse{
-					OrderUID: order.OrderUID,
-					Status:   "error",
-					Message:  "внутренняя ошибка сервера",
+					OrderUID:   order.OrderUID,
+					Status:     "error",
+					MessageErr: "внутренняя ошибка сервера",
 				}
 			}
 		}
@@ -256,9 +411,9 @@ func saveOrdersBatch(orders []*models.Order) map[string]OrderResponse {
 		log.Printf("Ошибка при сохранении заказов: %v", result.Error)
 		for _, order := range orders {
 			results[order.OrderUID] = OrderResponse{
-				OrderUID: order.OrderUID,
-				Status:   "error",
-				Message:  result.Error.Error(),
+				OrderUID:   order.OrderUID,
+				Status:     "error",
+				MessageErr: result.Error.Error(),
 			}
 		}
 		return results
@@ -269,9 +424,9 @@ func saveOrdersBatch(orders []*models.Order) map[string]OrderResponse {
 		log.Printf("Ошибка при коммите транзакции: %v", commitResult.Error)
 		for _, order := range orders {
 			results[order.OrderUID] = OrderResponse{
-				OrderUID: order.OrderUID,
-				Status:   "error",
-				Message:  "ошибка сохранения в базу",
+				OrderUID:   order.OrderUID,
+				Status:     "error",
+				MessageErr: "ошибка сохранения в базу",
 			}
 		}
 		return results
@@ -304,9 +459,9 @@ func saveOrdersBatch(orders []*models.Order) map[string]OrderResponse {
 	// добавляем успешные ответы
 	for _, order := range orders {
 		results[order.OrderUID] = OrderResponse{
-			OrderUID: order.OrderUID,
-			Status:   "success",
-			Message:  "заказ успешно добавлен в базу",
+			OrderUID:   order.OrderUID,
+			Status:     "success",
+			MessageErr: "заказ успешно добавлен в базу",
 		}
 	}
 

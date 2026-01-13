@@ -6,16 +6,12 @@ services:
     env_file:
       - .env
     command: ["./producer"]
-    ports:
-      - "8888:8888"  # метрики Prometheus
+    expose:
+      - "8888"    # метрики Prometheus
     networks:
       - kafka_frontend
-      - monitoring_monitoring
 
 networks:
   kafka_frontend:
     external: true  # Используем внешнюю сеть
     name: kafka_frontend
-  monitoring_monitoring:
-    external: true
-    name: monitoring_monitoring  # должно совпадать с сетью в monitoring/docker-compose.yml

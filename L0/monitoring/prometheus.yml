@@ -1,6 +1,6 @@
 global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
+  scrape_interval: 10s
+  evaluation_interval: 10s
   external_labels:
     monitor: 'Orders-Info-Menedger'
 
@@ -19,21 +19,10 @@ scrape_configs:
     scrape_interval: 1s
     metrics_path: '/metrics'
 
-  # Сервисы (через nginx или напрямую)
-  - job_name: 'service'
+  # Сервисы (напрямую)
+  - job_name: 'order-service'
     static_configs:
-      - targets: ['nginx:8081', 'service2:8890', 'service3:8890', 'service4:8890', 'service5:8890']
-    scrape_interval: 5s
+      - targets: ['service1:8890', 'service2:8890', 'service3:8890', 'service4:8890', 'service5:8890']
+    scrape_interval: 1s
     metrics_path: '/metrics'
 
-  # Nginx (опционально)
-  - job_name: 'nginx'
-    static_configs:
-      - targets: ['nginx:9113']
-    scrape_interval: 10s
-
-  # Redis (опционально)
-  - job_name: 'redis'
-    static_configs:
-      - targets: ['redis:9121']
-    scrape_interval: 10s

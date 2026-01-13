@@ -30,6 +30,7 @@ services:
     hostname: ${SERVICE_HOST_NAME:-service}1
     expose:
       - "8081"
+      - "8890"    # метрики Prometheus
     env_file:
       - .env
     depends_on:
@@ -50,6 +51,7 @@ services:
     hostname: ${SERVICE_HOST_NAME:-service}2
     expose:
       - "8081"
+      - "8890"    # метрики Prometheus
     env_file:
       - .env
     depends_on:
@@ -70,6 +72,7 @@ services:
     hostname: ${SERVICE_HOST_NAME:-service}3
     expose:
       - "8081"
+      - "8890"    # метрики Prometheus
     env_file:
       - .env
     depends_on:
@@ -90,6 +93,7 @@ services:
     hostname: ${SERVICE_HOST_NAME:-service}4
     expose:
       - "8081"
+      - "8890"    # метрики Prometheus
     env_file:
       - .env
     depends_on:
@@ -110,6 +114,7 @@ services:
     hostname: ${SERVICE_HOST_NAME:-service}5
     expose:
       - "8081"
+      - "8890"    # метрики Prometheus
     env_file:
       - .env
     depends_on:
