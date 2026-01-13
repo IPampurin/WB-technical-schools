@@ -44,12 +44,14 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 
 	// парсим json из запроса в структуру заказа
 	if err = json.Unmarshal(buf.Bytes(), &orders); err != nil {
+		log.Printf("ошибка парсинга входящих данных в структуру обработчика: %v.\n", err)
 		http.Error(w, "Ожидается JSON массив заказов", http.StatusBadRequest)
 		return
 	}
 
 	// если нет заказов
 	if len(orders) == 0 {
+		log.Println("Поступил пустой массив заказов в обработчик.")
 		http.Error(w, "Пустой массив заказов", http.StatusBadRequest)
 		return
 	}

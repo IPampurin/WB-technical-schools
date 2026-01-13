@@ -116,6 +116,14 @@ const (
 	dlqTopicConst       = "my-topic-DLQ" // топик для DLQ
 )
 
+// MessageWithTrace оборачивает kafka.Message вместе с его контекстом трейсинга для передачи trace через этапы пайплайна
+type MessageWithTrace struct {
+	Message   *kafka.Message  // само сообщение
+	Ctx       context.Context // контекст, содержащий span этого сообщения
+	Span      trace.Span      // сам span сообщения
+	StartTime time.Time       // для метрики времени обработки
+}
+
 // MessageForAPI структура для передачи трейса в api
 type MessageForAPI struct {
 	Data        json.RawMessage `json:"data"`
@@ -129,13 +137,6 @@ type PrepareBatch struct {
 	lastBatchMessage *kafka.Message               // указатель на последнее сообщение в батче, чтобы коммитить весь батч, так как порядок сообщений в батче сохраняется
 }
 
-// OrderResponse структура для ответов из api (копия из postOrder.go)
-type OrderResponse struct {
-	OrderUID string `json:"order_uid"`         // идентификатор сообщения
-	Status   string `json:"status"`            // статус: "success", "conflict", "badRequest", "error"
-	Message  string `json:"message,omitempty"` // информация об ошибке
-}
-
 // RespBatchInfo объединяет информацию об ответах api по сообщениям с самими сообщениями
 type RespBatchInfo struct {
 	respOfBatch      []OrderResponse              // ответы по каждому из сообщений батча
@@ -143,12 +144,11 @@ type RespBatchInfo struct {
 	lastBatchMessage *kafka.Message               // указатель на последнее сообщение в батче, чтобы коммитить весь батч, так как порядок сообщений в батче сохраняется
 }
 
-// MessageWithTrace оборачивает kafka.Message вместе с его контекстом трейсинга для передачи trace через этапы пайплайна
-type MessageWithTrace struct {
-	Message   *kafka.Message  // само сообщение
-	Ctx       context.Context // контекст, содержащий span этого сообщения
-	Span      trace.Span      // сам span сообщения
-	StartTime time.Time       // для метрики времени обработки
+// OrderResponse структура для ответов из api (копия из postOrder.go)
+type OrderResponse struct {
+	OrderUID   string `json:"order_uid"`         // идентификатор сообщения
+	Status     string `json:"status"`            // статус: "success", "conflict", "badRequest", "error"
+	MessageErr string `json:"message,omitempty"` // информация об ошибке
 }
 
 // ConsumerConfig описывает настройки с учётом переменных окружения
@@ -864,8 +864,8 @@ func sendBatchInfo(dlqWriter *kafka.Writer, collectCh <-chan []*PrepareBatch, re
 					// проверяем код ответа и парсим ответ
 					if resp.StatusCode == http.StatusMultiStatus || resp.StatusCode == http.StatusCreated {
 
-						var responsInfo []OrderResponse
-						if err := json.Unmarshal(body, &responsInfo); err != nil {
+						var orderResponses []OrderResponse
+						if err := json.Unmarshal(body, &orderResponses); err != nil {
 							// если ответ не парсится => батч в DLQ
 							for _, wrappedMsg := range packInfo[idx].messageByUID {
 								atomic.AddInt64(&msgInDLQ, 1)
@@ -877,7 +877,7 @@ func sendBatchInfo(dlqWriter *kafka.Writer, collectCh <-chan []*PrepareBatch, re
 
 						// считаем статистику
 						atomic.AddInt64(&inRespCounter, 1)
-						atomic.AddInt64(&inRespMsgCounter, int64(len(responsInfo)))
+						atomic.AddInt64(&inRespMsgCounter, int64(len(orderResponses)))
 
 						// обновляем span HTTP запроса
 						httpSpan.SetAttributes(
@@ -889,7 +889,7 @@ func sendBatchInfo(dlqWriter *kafka.Writer, collectCh <-chan []*PrepareBatch, re
 						// объединяем ответ по батчу и мапу [orderUID]->MessageWithTrace в структуру
 						// и шлём в канал для обработки в processBatchResponse
 						respBatchInfo := &RespBatchInfo{
-							respOfBatch:      responsInfo,
+							respOfBatch:      orderResponses,
 							messageByUID:     packInfo[idx].messageByUID,
 							lastBatchMessage: packInfo[idx].lastBatchMessage,
 						}
@@ -973,7 +973,7 @@ func processBatchResponse(r *kafka.Reader, dlqWriter *kafka.Writer, responsesCh 
 
 			// в DLQ отправляем не только явные ошибки, но и дубликаты сообщений (для выявления возможных причин появления)
 			if resp.Status == "badRequest" || resp.Status == "error" || resp.Status == "conflict" {
-				sendToDLQ(dlqWriter, wrappedMsg.Message, resp.Message)
+				sendToDLQ(dlqWriter, wrappedMsg.Message, resp.MessageErr)
 				msgInDLQ++
 			}
 
