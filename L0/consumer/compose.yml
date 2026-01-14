@@ -3,6 +3,7 @@ version: '3.9'
 services:
   consumer:  
     build: .
+    container_name: consumer
     env_file:
       - .env
     command: ["./consumer"]

@@ -14,6 +14,7 @@ services:
       - COLLECTOR_OTLP_ENABLED=true
     networks:
       - monitoring
+      - kafka_frontend
 
   # Prometheus для метрик
   prometheus:

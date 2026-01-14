@@ -28,7 +28,7 @@ import (
 // прометеус метрики для сервиса
 var (
 	// RPS сервиса (обработанные сообщения) - как в продюсере messagesSent
-	// -   RPS: rate(service_messages_processed_total[1m])
+	// -   RPS: rate(service_messages_processed_total[5s])
 	// - Total: service_messages_processed_total
 	serviceMessagesProcessed = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "service_messages_processed_total",
@@ -36,9 +36,7 @@ var (
 	})
 
 	// время работы с БД - аналогично consumerApiResponseTime
-	// - Среднее время: avg(rate(service_db_operation_duration_seconds_sum[5m])) / avg(rate(service_db_operation_duration_seconds_count[5m]))
-	// - 95-й перцентиль: histogram_quantile(0.95, sum(rate(service_db_operation_duration_seconds_bucket[5m])) by (le))
-	// - 99-й перцентиль: histogram_quantile(0.99, sum(rate(service_db_operation_duration_seconds_bucket[5m])) by (le))
+	// - Среднее время: avg(rate(service_db_operation_duration_seconds_sum[15s])) / avg(rate(service_db_operation_duration_seconds_count[15s]))
 	serviceDBDuration = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "service_db_operation_duration_seconds",
 		Help:    "Время выполнения операций с базой данных",

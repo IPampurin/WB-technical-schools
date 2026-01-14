@@ -3,6 +3,7 @@ version: '3.9'
 services:
   producer:  
     build: .
+    container_name: producer
     env_file:
       - .env
     command: ["./producer"]
