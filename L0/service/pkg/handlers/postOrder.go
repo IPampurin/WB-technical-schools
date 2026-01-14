@@ -337,7 +337,7 @@ func parseIncomingData(data []byte) ([]IncomingMessage, error) {
 	var messages []IncomingMessage
 	if err := json.Unmarshal(data, &messages); err == nil {
 		// проверяем, что есть поле Data
-		if len(messages[0].Data) != 0 {
+		if len(messages) > 0 && len(messages[0].Data) != 0 {
 			return messages, nil
 		}
 	}
@@ -372,12 +372,6 @@ func saveOrdersBatch(orders []*models.Order) map[string]OrderResponse {
 	if len(orders) == 0 {
 		return results
 	}
-
-	startTime := time.Now()
-	defer func() {
-		duration := time.Since(startTime).Seconds()
-		serviceDBDuration.Observe(duration)
-	}()
 
 	log.Printf("Начинаем транзакцию для сохранения %d заказов.", len(orders))
 	tx := db.DB.Db.Begin()
