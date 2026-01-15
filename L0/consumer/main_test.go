@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -393,6 +394,12 @@ func TestExtractOrderUID(t *testing.T) {
 	}
 }
 
+// IncomingMessage структура для входящих сообщений (как в хэндлере)
+type IncomingMessage struct {
+	Data        json.RawMessage `json:"data"`
+	Traceparent string          `json:"traceparent,omitempty"`
+}
+
 // TestConsumPipelineIntegrations тестирует работу конвейера с подключением к тестовому брокеру
 func TestConsumPipelineIntegrations(t *testing.T) {
 
@@ -427,7 +434,7 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 	dlqTopic := "test-dlq-consumer"
 
 	// устанавливаем соединение с брокером и создаём топики
-	connTestTopic, err := kafka.DialLeader(context.Background(), "tcp", brokerAddr, testTopic, 0)
+	connTestTopic, err := kafka.DialLeader(ctx, "tcp", brokerAddr, testTopic, 0)
 	if err != nil {
 		t.Logf("ошибка создания тестового топика кафки в тесте: %v.\n", err)
 	}
@@ -437,7 +444,7 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 			t.Logf("ошибка при закрытии соединения c тестовым топиком в тесте: %v.\n", err)
 		}
 	}()
-	connDLQTopic, err := kafka.DialLeader(context.Background(), "tcp", brokerAddr, dlqTopic, 0)
+	connDLQTopic, err := kafka.DialLeader(ctx, "tcp", brokerAddr, dlqTopic, 0)
 	if err != nil {
 		t.Logf("ошибка создания тестового топика DLQ кафки в тесте: %v.\n", err)
 	}
@@ -473,18 +480,16 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 
 	// 6. Создаем тестовый API сервер
 	var apiRequests []string
-	var apiRequestsMu sync.Mutex
-	successCount := 0 // отправленные в API сообщения (с order_uid)
+	var successCount int64 // отправленные в API сообщения (с order_uid)
 
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		apiRequestsMu.Lock()
-		defer apiRequestsMu.Unlock()
 
 		// считываем сообщения из запроса и парсим
 		body, _ := io.ReadAll(r.Body)
 		apiRequests = append(apiRequests, string(body))
 
-		var messages []json.RawMessage
+		// парсим как массив IncomingMessage
+		var messages []IncomingMessage
 		if err := json.Unmarshal(body, &messages); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -492,26 +497,31 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 
 		// формируем ответы
 		responses := make([]OrderResponse, len(messages))
-		for i, msgData := range messages {
+		for i, msg := range messages {
+			// извлекаем order_uid из Data
 			var data map[string]interface{}
-			json.Unmarshal(msgData, &data)
+			json.Unmarshal(msg.Data, &data)
 
 			orderUID, _ := data["order_uid"].(string)
 			status := "success"
 			if orderUID == "" {
 				status = "error"
+				responses[i] = OrderResponse{
+					OrderUID:   "",
+					Status:     status,
+					MessageErr: "order_uid отсутствует",
+				}
 			} else {
-				successCount++
-			}
-
-			responses[i] = OrderResponse{
-				OrderUID: orderUID,
-				Status:   status,
+				atomic.AddInt64(&successCount, 1)
+				responses[i] = OrderResponse{
+					OrderUID: orderUID,
+					Status:   status,
+				}
 			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusMultiStatus)
+		w.WriteHeader(http.StatusMultiStatus) // всегда 207 для теста
 		json.NewEncoder(w).Encode(responses)
 	}))
 	defer apiServer.Close()
@@ -538,12 +548,12 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 		KafkaPort:      port,
 		ServiceHost:    "127.0.0.1",
 		ServicePort:    apiPort,
-		BatchSize:      5,
-		BatchTimeout:   100 * time.Millisecond,
+		BatchSize:      10,
+		BatchTimeout:   1 * time.Millisecond,
 		MaxRetries:     1,
-		RetryDelayBase: 50 * time.Millisecond,
+		RetryDelayBase: 1 * time.Millisecond,
 		CountClient:    2,
-		ClientTimeout:  2 * time.Second,
+		ClientTimeout:  500 * time.Millisecond,
 		DlqTopic:       dlqTopic,
 	}
 
@@ -577,10 +587,10 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 
 	// 11. Организуем каналы
 	messagesCh := make(chan *MessageWithTrace, cfg.BatchSize*10) // канал для входящих сообщений с большим буфером
-	batchesCh := make(chan []*MessageWithTrace, cfg.BatchSize/4) // канал для передачи батчей на обработку
-	preparesCh := make(chan *PrepareBatch, cfg.BatchSize/4)      // канал для передачи подготовленной информации к отправке в api
-	collectCh := make(chan []*PrepareBatch, cfg.BatchSize/4)     // канал скомпанованных данных о батчах для параллельной передачи в api
-	responsesCh := make(chan *RespBatchInfo, cfg.BatchSize/4)    // канал передачи ответов по батчам и мап с сообщениями
+	batchesCh := make(chan []*MessageWithTrace, cfg.BatchSize/1) // канал для передачи батчей на обработку
+	preparesCh := make(chan *PrepareBatch, cfg.BatchSize/1)      // канал для передачи подготовленной информации к отправке в api
+	collectCh := make(chan []*PrepareBatch, cfg.BatchSize/1)     // канал скомпанованных данных о батчах для параллельной передачи в api
+	responsesCh := make(chan *RespBatchInfo, cfg.BatchSize/1)    // канал передачи ответов по батчам и мап с сообщениями
 
 	// канал для передачи ошибки ридера при чтении сообщений из кафки
 	errCh := make(chan error)
@@ -591,8 +601,8 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 
 	// 12. Запускаем конвейер (собственно, сам этот ужасный тест)
 
-	// чтение прекращается через пару секунд - для тестового количества сообщений достаточно
-	ctxPipe, pipeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// чтение прекращается через несколько секунд (см. п.13)
+	ctxPipe, pipeCancel := context.WithCancel(context.Background())
 	defer pipeCancel()
 
 	// wgPipe для ожидания всех горутин конвейера
@@ -627,6 +637,8 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 
 	// 13. Ждём завершения работы конвейера
 	go func() {
+		<-time.After(15 * time.Second)
+		pipeCancel()
 		wgPipe.Wait()
 	}()
 
@@ -645,10 +657,8 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 	}
 
 	// 14. Проверяем результаты
-	apiRequestsMu.Lock()
 	t.Logf("API получило %d запросов.", len(apiRequests))
-	t.Logf("Успешно обработано сообщений: %d.", successCount)
-	apiRequestsMu.Unlock()
+	t.Logf("Успешно обработано сообщений: %d.", int(successCount))
 
 	// проверяем сообщения в DLQ
 	dlqReader := kafka.NewReader(kafka.ReaderConfig{
@@ -692,7 +702,7 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 
 	// Проверяем, что API получило только валидные сообщения
 	expectedAPICount := len(testMessages) - expectedDLQCount // 30 - 30/5 = 24 сообщения
-	require.Equal(t, expectedAPICount, successCount, "API должно было получить только валидные сообщения.")
+	require.Equal(t, expectedAPICount, int(successCount), "API должно было получить только валидные сообщения.")
 
 	t.Log("✅ Тест конвейера консумера завершен успешно.")
 }
