@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 3,
+  "id": 2,
   "links": [],
   "panels": [
     {
@@ -79,13 +79,12 @@
                 "value": 80
               }
             ]
-          },
-          "unit": "ops"
+          }
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 11,
+        "h": 13,
         "w": 12,
         "x": 0,
         "y": 0
@@ -93,9 +92,11 @@
       "id": 1,
       "options": {
         "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
+          "calcs": [
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "right",
           "showLegend": true
         },
         "tooltip": {
@@ -112,208 +113,11 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "rate(consumer_stage_messages_total[20s])",
+          "expr": "rate(producer_messages_sent_total[5s])",
           "interval": "1s",
-          "legendFormat": "{{stage}}",
-          "range": true,
-          "refId": "RPS по этапам"
-        }
-      ],
-      "title": "RPS по этапам",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "showValues": false,
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ops"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 11,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      },
-      "id": 4,
-      "options": {
-        "legend": {
-          "calcs": [
-            "max"
-          ],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "12.3.1",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "rate(consumer_stage_messages_total{stage=\"processed\"}[5s])",
-          "interval": "1s",
-          "legendFormat": "сообщений в секунду",
+          "legendFormat": "Продюсер",
           "range": true,
           "refId": "A"
-        }
-      ],
-      "title": "RPS максимум",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "showValues": false,
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 12,
-        "w": 12,
-        "x": 0,
-        "y": 11
-      },
-      "id": 3,
-      "options": {
-        "legend": {
-          "calcs": [
-            "min",
-            "max"
-          ],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "12.3.1",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.99, rate(consumer_lag_seconds_bucket[5s]))",
-          "interval": "1s",
-          "legendFormat": "P99 (max)",
-          "range": true,
-          "refId": "P99 (max)"
         },
         {
           "datasource": {
@@ -321,16 +125,31 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "rate(consumer_lag_seconds_sum[5s]) / rate(consumer_lag_seconds_count[5s])",
+          "expr": "rate(consumer_stage_messages_total{stage=\"processed\"}[5s])",
           "hide": false,
           "instant": false,
           "interval": "1s",
-          "legendFormat": "Avg",
+          "legendFormat": "Консумер",
           "range": true,
-          "refId": "Средний"
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "rate(service_messages_processed_total[5s])\r\n",
+          "hide": false,
+          "instant": false,
+          "interval": "1s",
+          "legendFormat": "{{instance}}",
+          "range": true,
+          "refId": "C"
         }
       ],
-      "title": "Lag консумера",
+      "title": "RPS всей системы",
       "type": "timeseries"
     },
     {
@@ -364,7 +183,8 @@
             "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
-              "type": "linear"
+              "log": 2,
+              "type": "log"
             },
             "showPoints": "auto",
             "showValues": false,
@@ -396,17 +216,17 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 12,
+        "h": 13,
         "w": 12,
         "x": 12,
-        "y": 11
+        "y": 0
       },
       "id": 2,
       "options": {
         "legend": {
           "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
+          "displayMode": "table",
+          "placement": "right",
           "showLegend": true
         },
         "tooltip": {
@@ -419,11 +239,11 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, rate(consumer_api_response_duration_seconds_bucket[15s]))",
-          "interval": "1s",
-          "legendFormat": "P95",
+          "expr": "histogram_quantile(0.95, rate(consumer_api_response_time_bucket[5s]))",
+          "interval": "5s",
+          "legendFormat": "API 95%",
           "range": true,
-          "refId": "P95"
+          "refId": "A"
         },
         {
           "datasource": {
@@ -431,13 +251,13 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, rate(consumer_api_response_duration_seconds_bucket[15s]))",
+          "expr": "histogram_quantile(0.95, rate(service_db_operation_duration_seconds_bucket[5s]))",
           "hide": false,
           "instant": false,
-          "interval": "1s",
-          "legendFormat": "P99",
+          "interval": "5s",
+          "legendFormat": "{{instance}} - БД 95%",
           "range": true,
-          "refId": "P99"
+          "refId": "B"
         },
         {
           "datasource": {
@@ -445,17 +265,97 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "rate(consumer_api_response_duration_seconds_sum[15s]) / rate(consumer_api_response_duration_seconds_count[15s])",
+          "expr": "avg(rate(consumer_lag_seconds_sum[15s])) / avg(rate(consumer_lag_seconds_count[15s]))",
           "hide": false,
           "instant": false,
-          "interval": "1s",
-          "legendFormat": "Avg",
+          "interval": "10s",
+          "legendFormat": "Lag кафки",
           "range": true,
-          "refId": "Среднее"
+          "refId": "C"
         }
       ],
-      "title": "Время ответа API",
+      "title": "Задержки системы",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "сообщений"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(producer_messages_sent_total)",
+          "interval": "5s",
+          "legendFormat": "Создано",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "sum(service_messages_processed_total)",
+          "hide": false,
+          "instant": false,
+          "interval": "5s",
+          "legendFormat": "Сохранено",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Всего обработано",
+      "type": "stat"
     }
   ],
   "preload": false,
@@ -465,12 +365,12 @@
     "list": []
   },
   "time": {
-    "from": "2026-01-04T15:53:25.957Z",
-    "to": "2026-01-04T15:56:39.409Z"
+    "from": "2026-01-14T13:25:05.691Z",
+    "to": "2026-01-14T13:27:08.992Z"
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Consumer dashboard",
-  "uid": "adjv4tj",
+  "title": "Join Dashboard",
+  "uid": "adv9h8z",
   "version": 1
 }

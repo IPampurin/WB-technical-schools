@@ -120,8 +120,8 @@
           "format": "time_series",
           "hide": false,
           "instant": false,
-          "interval": "10s",
-          "legendFormat": "__auto",
+          "interval": "1s",
+          "legendFormat": "сообщений в секунду",
           "maxDataPoints": 1000,
           "range": true,
           "refId": "RPS продюсера"
@@ -196,8 +196,8 @@
           "expr": "producer_messages_sent_total",
           "hide": false,
           "instant": false,
-          "interval": "10s",
-          "legendFormat": "__auto",
+          "interval": "1s",
+          "legendFormat": "messages",
           "maxDataPoints": 1000,
           "range": true,
           "refId": "Всего отправлено"
