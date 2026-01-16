@@ -28,7 +28,7 @@ func openTestDB(t *testing.T) *gorm.DB {
 	}
 	nameDB, ok := os.LookupEnv("DBL0_NAME")
 	if !ok {
-		nameDB = "level-zero-db"
+		nameDB = "db-postgres"
 	}
 	passwordDB, ok := os.LookupEnv("DBL0_PASSWORD")
 	if !ok {
