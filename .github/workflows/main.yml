@@ -1,0 +1,78 @@
+name: Order-Service
+
+on: 
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: [1.24.x]
+  
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+        
+    - name: Display Go version
+      run: go version
+
+    - name: Install dependencies
+      run: |
+        cd producer && go mod tidy
+        cd ../consumer && go mod tidy
+        cd ../service && go mod tidy
+    
+    - name: Setup Docker
+      uses: docker/setup-buildx-action@v3
+
+    - name: Run producer unit tests
+      run: |
+        cd producer
+        go test -run ^TestGetEnvString$ ./...
+        go test -run ^TestGetEnvInt$ ./...
+        go test -run ^TestReadConfigProducer$ ./...
+        go test -run ^TestCreateDelivery$ ./...
+        go test -run ^TestCreatePayment$ ./...
+        go test -run ^TestCreateItem$ ./...
+        go test -run ^TestMessageGenerate$ ./...
+        go test -run ^TestMessageGenerateCount$ ./...
+    
+    - name: Run producer integration test
+      env:
+        CGO_ENABLED: 0
+        GOOS: linux
+      run: |
+        cd producer
+        go test -timeout 2m -run ^TestProduceIntegrations$ ./...
+
+    - name: Run consumer unit tests
+      run: |
+        cd consumer
+        go test -run ^TestGetEnvString$ ./...
+        go test -run ^TestGetEnvInt$ ./...
+        go test -run ^TestReadConfig$ ./...
+        go test -run ^TestExtractOrderUID$ ./...
+    
+    - name: Run consumer integration test
+      env:
+        CGO_ENABLED: 0
+        GOOS: linux
+      run: |
+        cd consumer
+        go test -timeout 2m -run ^TestConsumPipelineIntegrations$ ./...
+
+    - name: Run service unit tests
+      run: |
+        cd service
+        go test -short ./tests/...
+
+
+      
