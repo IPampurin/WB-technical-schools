@@ -27,6 +27,10 @@ func setupRouter() http.Handler {
 // TestServerStart тестирует запускается ли сервер в принципе
 func TestServerStart(t *testing.T) {
 
+	if testing.Short() {
+		t.Skip("Пропускаем тест в short режиме.")
+	}
+
 	// создаем тестовый сервер
 	ts := httptest.NewServer(setupRouter())
 	defer ts.Close()

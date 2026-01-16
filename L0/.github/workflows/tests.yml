@@ -1,6 +1,9 @@
 name: Order-Service
 
-on: [push]
+on: 
+  push:
+    branches:
+      - main
 
 jobs:
   build:
@@ -22,13 +25,17 @@ jobs:
       run: go version
 
     - name: Install dependencies
-      run: go mod tidy
+      run: |
+        cd producer && go mod tidy
+        cd ../consumer && go mod tidy
+        cd ../service && go mod tidy
     
     - name: Setup Docker
       uses: docker/setup-buildx-action@v3
 
     - name: Run producer unit tests
       run: |
+        cd producer
         go test -run ^TestGetEnvString$ ./...
         go test -run ^TestGetEnvInt$ ./...
         go test -run ^TestReadConfigProducer$ ./...
@@ -43,10 +50,12 @@ jobs:
         CGO_ENABLED: 0
         GOOS: linux
       run: |
+        cd producer
         go test -timeout 2m -run ^TestProduceIntegrations$ ./...
 
     - name: Run consumer unit tests
       run: |
+        cd consumer
         go test -run ^TestGetEnvString$ ./...
         go test -run ^TestGetEnvInt$ ./...
         go test -run ^TestReadConfig$ ./...
@@ -57,73 +66,13 @@ jobs:
         CGO_ENABLED: 0
         GOOS: linux
       run: |
+        cd consumer
         go test -timeout 2m -run ^TestConsumPipelineIntegrations$ ./...
 
+    - name: Run service unit tests
+      run: |
+        cd service
+        go test -short ./tests/...
 
 
-        
-    - name: Run DB
-      run: |
-        CGO_ENABLED=0 GOOS=linux go run main.go &
-        sleep 100
-        go test -run ^TestDB$ ./tests 
-        
-    - name: Run NextDate
-      run: |
-        CGO_ENABLED=0 GOOS=linux go run main.go &
-        sleep 100
-        go test -run ^TestNextDate$ ./tests 
-        
-    - name: Run DB
-      run: |
-        CGO_ENABLED=0 GOOS=linux go run main.go &
-        sleep 100
-        go test -run ^TestDB$ ./tests 
-                
-    - name: Run NextDate
-      run: |
-        CGO_ENABLED=0 GOOS=linux go run main.go &
-        sleep 100
-        go test -run ^TestNextDate$ ./tests 
-    
-    - name: Run AddTask
-      run: |
-        CGO_ENABLED=0 GOOS=linux go run main.go &
-        sleep 100
-        go test -run ^TestAddTask$ ./tests 
-
-    - name: Run TestTasks
-      run: |
-        CGO_ENABLED=0 GOOS=linux go run main.go &
-        sleep 100
-        go test -run ^TestTasks$ ./tests
-
-    - name: Run TestTask
-      run: |
-        CGO_ENABLED=0 GOOS=linux go run main.go &
-        sleep 100
-        go test -run ^TestTask$ ./tests
-
-    - name: Run TestEditTask
-      run: |
-          CGO_ENABLED=0 GOOS=linux go run main.go &
-          sleep 100
-          go test -run ^TestEditTask$ ./tests
-
-    - name: Run TestDone
-      run: |
-          CGO_ENABLED=0 GOOS=linux go run main.go &
-          sleep 100
-          go test -run ^TestDone$ ./tests
-
-    - name: Run TestDelTask
-      run: |
-          CGO_ENABLED=0 GOOS=linux go run main.go &
-          sleep 100
-          go test -run ^TestDelTask$ ./tests
-
-    - name: Run test
-      run: |
-          CGO_ENABLED=0 GOOS=linux go run main.go &
-          sleep 100
-          go test ./tests
+      

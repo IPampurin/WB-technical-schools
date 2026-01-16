@@ -60,6 +60,11 @@ func openTestDB(t *testing.T) *gorm.DB {
 
 // TestDBOperations тестирует взаимодействие с нашей базой данных в зпущенном состоянии
 func TestDBOperations(t *testing.T) {
+
+	if testing.Short() {
+		t.Skip("Пропускаем тест в short режиме.")
+	}
+
 	// Подключаемся к БД
 	testDB := openTestDB(t)
 
