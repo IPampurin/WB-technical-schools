@@ -1,78 +1,79 @@
-name: Order-Service
+name: Order-Service CI
 
-on: 
+on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        go-version: [1.24.x]
-  
+        module: ["service", "producer", "consumer"]
+    
     steps:
     - uses: actions/checkout@v4
-
-    - name: Setup Go
+    
+    - name: Set up Go with cache
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ matrix.go-version }}
-        
+        go-version: '1.24.x'
+        cache: true
+        cache-dependency-path: ${{ matrix.module }}/go.sum
+    
     - name: Display Go version
       run: go version
 
     - name: Install dependencies
-      run: |
-        cd producer && go mod tidy
-        cd ../consumer && go mod tidy
-        cd ../service && go mod tidy
+      working-directory: ${{ matrix.module }}
+      run: go mod download
+
+    - name: Run unit tests
+      working-directory: ${{ matrix.module }}
+      run: go test -v -short ./...
+
+    - name: Vet
+      working-directory: ${{ matrix.module }}
+      run: go vet ./...
+
+    - name: Install golangci-lint
+      run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+    - name: Run golangci-lint
+      working-directory: ${{ matrix.module }}
+      run: golangci-lint run ./...
+ 
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: test
     
-    - name: Setup Docker
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.x'
+        cache: false
+    
+    - name: Set up Docker
       uses: docker/setup-buildx-action@v3
-
-    - name: Run producer unit tests
-      run: |
-        cd producer
-        go test -run ^TestGetEnvString$ ./...
-        go test -run ^TestGetEnvInt$ ./...
-        go test -run ^TestReadConfigProducer$ ./...
-        go test -run ^TestCreateDelivery$ ./...
-        go test -run ^TestCreatePayment$ ./...
-        go test -run ^TestCreateItem$ ./...
-        go test -run ^TestMessageGenerate$ ./...
-        go test -run ^TestMessageGenerateCount$ ./...
     
-    - name: Run producer integration test
-      env:
-        CGO_ENABLED: 0
-        GOOS: linux
+    - name: Start Docker
       run: |
-        cd producer
-        go test -timeout 2m -run ^TestProduceIntegrations$ ./...
-
-    - name: Run consumer unit tests
-      run: |
-        cd consumer
-        go test -run ^TestGetEnvString$ ./...
-        go test -run ^TestGetEnvInt$ ./...
-        go test -run ^TestReadConfig$ ./...
-        go test -run ^TestExtractOrderUID$ ./...
+        sudo systemctl start docker || true
+        sudo chmod 666 /var/run/docker.sock || true
+        docker version
     
-    - name: Run consumer integration test
-      env:
-        CGO_ENABLED: 0
-        GOOS: linux
+    - name: Run producer integration tests
+      working-directory: ./producer
       run: |
-        cd consumer
-        go test -timeout 2m -run ^TestConsumPipelineIntegrations$ ./...
-
-    - name: Run service unit tests
+        go mod download
+        go test -v -timeout 2m -run ^TestProduceIntegrations$ ./...
+    
+    - name: Run consumer integration tests
+      working-directory: ./consumer
       run: |
-        cd service
-        go test -short ./tests/...
-
-
-      
+        go mod download
+        go test -v -timeout 2m -run ^TestConsumPipelineIntegrations$ ./...
