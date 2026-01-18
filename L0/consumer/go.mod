@@ -1,4 +1,4 @@
-module github.com/IPampurin/WB-technical-schools/L0/consumer
+module github.com/IPampurin/Orders-Info-Menedger/consumer
 
 go 1.24.1
 

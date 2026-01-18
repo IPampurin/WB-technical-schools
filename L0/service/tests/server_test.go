@@ -2,6 +2,7 @@ package tests
 
 import (
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,7 +19,10 @@ func setupRouter() http.Handler {
 	// добавляем минимальный маршрут для проверки
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Server is running"))
+		_, err := w.Write([]byte("Server is running"))
+		if err != nil {
+			log.Printf("ошибка при формировании тестового ответа: %v\n", err)
+		}
 	})
 
 	return r

@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/models"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/db"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/models"
 	"github.com/redis/go-redis/v9"
 )
 

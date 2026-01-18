@@ -500,7 +500,11 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 		for i, msg := range messages {
 			// извлекаем order_uid из Data
 			var data map[string]interface{}
-			json.Unmarshal(msg.Data, &data)
+			err = json.Unmarshal(msg.Data, &data)
+			if err != nil {
+				// логируем и продожаем
+				t.Logf("Поступило некорректное сообщение: ошибка при десериализации тестового сообщения %v", err)
+			}
 
 			orderUID, _ := data["order_uid"].(string)
 			status := "success"
@@ -522,7 +526,10 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusMultiStatus) // всегда 207 для теста
-		json.NewEncoder(w).Encode(responses)
+		err = json.NewEncoder(w).Encode(responses)
+		if err != nil {
+			t.Logf("ошибка кодирования ответа по тестовым сообщениям: %v", err)
+		}
 	}))
 	defer apiServer.Close()
 
@@ -684,7 +691,10 @@ func TestConsumPipelineIntegrations(t *testing.T) {
 			break
 		}
 		dlqMessages = append(dlqMessages, msg)
-		dlqReader.CommitMessages(dlqCtx, msg)
+		err = dlqReader.CommitMessages(dlqCtx, msg)
+		if err != nil {
+			t.Logf("ошибка коммита тестового сообщения: %v", err)
+		}
 	}
 
 	dlqCount := len(dlqMessages)

@@ -262,8 +262,13 @@ func main() {
 
 	start := time.Now()
 
+	var err error
+
 	// инициализируем генератор gofakeit
-	gofakeit.Seed(0)
+	err = gofakeit.Seed(0)
+	if err != nil {
+		log.Fatalf("ошибка инициализации генератора gofakeit: %v", err)
+	}
 
 	// запускаем сервер для метрик
 	go func() {
@@ -277,7 +282,6 @@ func main() {
 
 	// инициализируем трейсинг
 	var tp *sdktrace.TracerProvider
-	var err error
 
 	tp, err = initTracing()
 	if err != nil {

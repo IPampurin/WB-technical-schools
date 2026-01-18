@@ -9,8 +9,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/handlers"
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/shutdown"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/handlers"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/shutdown"
 	"github.com/go-chi/chi/v5"
 )
 

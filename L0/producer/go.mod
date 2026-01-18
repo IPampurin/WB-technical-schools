@@ -1,4 +1,4 @@
-module github.com/IPampurin/WB-technical-schools/L0/produser
+module github.com/IPampurin/Orders-Info-Menedger/produser
 
 go 1.24.1
 

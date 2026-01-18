@@ -18,10 +18,10 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/cache"
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/models"
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/shutdown"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/cache"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/db"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/models"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/shutdown"
 	"gorm.io/gorm"
 )
 
@@ -142,7 +142,7 @@ func PostOrder(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// создаем span для обработки этого сообщения
-		msgCtx, msgSpan := otel.Tracer("order-service").Start(msgCtx, "service.order.process",
+		_, msgSpan := otel.Tracer("order-service").Start(msgCtx, "service.order.process",
 			trace.WithAttributes(
 				attribute.String("order.uid", order.OrderUID),
 				attribute.Int("message.index", i),

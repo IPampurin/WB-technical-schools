@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/models"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/models"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -22,19 +22,19 @@ func countOrders(db *gorm.DB) (int64, error) {
 // Функция открытия БД с реальными параметрами подключения
 func openTestDB(t *testing.T) *gorm.DB {
 	// Получаем параметры подключения из окружения
-	portDB, ok := os.LookupEnv("DBL0_PORT")
+	portDB, ok := os.LookupEnv("DB_PORT")
 	if !ok {
 		portDB = "5432"
 	}
-	nameDB, ok := os.LookupEnv("DBL0_NAME")
+	nameDB, ok := os.LookupEnv("DB_NAME")
 	if !ok {
 		nameDB = "db-postgres"
 	}
-	passwordDB, ok := os.LookupEnv("DBL0_PASSWORD")
+	passwordDB, ok := os.LookupEnv("DB_PASSWORD")
 	if !ok {
 		passwordDB = "postgres"
 	}
-	userDB, ok := os.LookupEnv("DBL0_USER")
+	userDB, ok := os.LookupEnv("DB_USER")
 	if !ok {
 		userDB = "postgres"
 	}

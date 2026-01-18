@@ -636,7 +636,10 @@ func TestProduceIntegrations(t *testing.T) {
 			break
 		}
 		messages = append(messages, msg)
-		r.CommitMessages(readCtx, msg)
+		err = r.CommitMessages(readCtx, msg)
+		if err != nil {
+			t.Logf("ошибка коммита тестового сообщения: %v", err)
+		}
 	}
 	readDuration := time.Since(readStart)
 

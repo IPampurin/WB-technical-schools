@@ -7,10 +7,10 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/cache"
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/models"
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/shutdown"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/cache"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/db"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/models"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/shutdown"
 	"github.com/go-chi/chi/v5"
 	"gorm.io/gorm"
 )
@@ -96,7 +96,12 @@ func GetOrderByID(w http.ResponseWriter, r *http.Request) {
 	// формируем ответ
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(resp)
+	_, err := w.Write(resp)
+	if err != nil {
+		log.Printf("ошибка записи ответа для заказа %s: %v\n", orderUID, err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
 
 	log.Printf("Заказ с UID %s успешно получен", orderUID)
 }

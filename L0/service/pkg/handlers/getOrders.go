@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/models"
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/shutdown"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/db"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/models"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/shutdown"
 )
 
 // GetOrders выводит список всех заказов с учётом параметров пагинации и общим количеством

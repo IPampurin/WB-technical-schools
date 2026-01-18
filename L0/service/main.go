@@ -8,9 +8,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/cache"
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/db"
-	"github.com/IPampurin/WB-technical-schools/L0/service/pkg/server"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/cache"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/db"
+	"github.com/IPampurin/Orders-Info-Menedger/service/pkg/server"
 
 	// для трейсинга
 	"go.opentelemetry.io/otel"
@@ -19,7 +19,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
-	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 
 	// для Prometheus метрик
@@ -28,7 +27,7 @@ import (
 )
 
 // провайдер трейсов для сервиса
-var tracer trace.Tracer
+// var tracer trace.Tracer
 
 // initTracing - инициализация трейсинга для сервиса
 func initTracing() (*sdktrace.TracerProvider, error) {
@@ -82,7 +81,7 @@ func main() {
 	if err != nil {
 		log.Printf("Ошибка инициализации трейсинга: %v, работаем без трейсинга.\n", err)
 		// создаем noop-трейсер для работы без трассировки
-		tracer = noop.NewTracerProvider().Tracer("noop-service")
+		_ = noop.NewTracerProvider().Tracer("noop-service")
 	} else {
 		defer func() {
 			if err := tp.Shutdown(context.Background()); err != nil {
@@ -90,7 +89,7 @@ func main() {
 			}
 		}()
 		// получаем реальный трейсер из провайдера
-		tracer = otel.Tracer("order-service")
+		_ = otel.Tracer("order-service")
 	}
 
 	// подключаем базу данных

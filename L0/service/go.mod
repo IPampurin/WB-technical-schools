@@ -1,4 +1,4 @@
-module github.com/IPampurin/WB-technical-schools/L0/service
+module github.com/IPampurin/Orders-Info-Menedger/service
 
 go 1.24.1
 
