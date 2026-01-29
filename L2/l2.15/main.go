@@ -313,7 +313,7 @@ func splitConditional(line string) []string {
 func executeSimpleCommand(shell *Shell, cmdLine string) int {
 
 	// парсим строку команды: разбиваем на аргументы, получаем файлы для редиректов
-	args, stdinFile, stdoutFile, stderrFile := parseCommand(cmdLine)
+	args, stdinFile, stdoutFile, stderrFile, stdoutAppend := parseCommand(cmdLine)
 	// если команда пустая (нет аргументов), ничего не делаем
 	if len(args) == 0 {
 		return 0
@@ -321,6 +321,58 @@ func executeSimpleCommand(shell *Shell, cmdLine string) int {
 
 	// проверяем, является ли команда встроенной (cd, echo ...)
 	if builtin, ok := builtins[args[0]]; ok {
+
+		// сохраняем оригинальные стандартные потоки
+		oldStdin := os.Stdin
+		oldStdout := os.Stdout
+		oldStderr := os.Stderr
+
+		// функция для восстановления потоков
+		defer func() {
+			os.Stdin = oldStdin
+			os.Stdout = oldStdout
+			os.Stderr = oldStderr
+		}()
+
+		// обработка редиректа ввода
+		if stdinFile != "" {
+			file, err := os.Open(stdinFile)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "ошибка открытия файла %s: %v\n", stdinFile, err)
+				return 1
+			}
+			defer file.Close()
+			os.Stdin = file
+		}
+
+		// обработка редиректа вывода
+		if stdoutFile != "" {
+			var file *os.File
+			var err error
+			if stdoutAppend {
+				file, err = os.OpenFile(stdoutFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			} else {
+				file, err = os.Create(stdoutFile)
+			}
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "ошибка создания файла %s: %v\n", stdoutFile, err)
+				return 1
+			}
+			defer file.Close()
+			os.Stdout = file
+		}
+
+		// обработка редиректа ошибок
+		if stderrFile != "" {
+			file, err := os.Create(stderrFile)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "ошибка создания файла %s: %v\n", stderrFile, err)
+				return 1
+			}
+			defer file.Close()
+			os.Stderr = file
+		}
+
 		// выполняем встроенную команду
 		if err := builtin(args); err != nil {
 			fmt.Fprintf(os.Stderr, "ошибка: %v\n", err)
@@ -330,11 +382,11 @@ func executeSimpleCommand(shell *Shell, cmdLine string) int {
 	}
 
 	// если команда не встроенная, запускаем внешнюю команду
-	return executeExternalCommand(shell, args, stdinFile, stdoutFile, stderrFile)
+	return executeExternalCommand(shell, args, stdinFile, stdoutFile, stderrFile, stdoutAppend)
 }
 
 // parseCommand разбивает команду на аргументы, получает файлы для редиректов
-func parseCommand(line string) (args []string, stdinFile, stdoutFile, stderrFile string) {
+func parseCommand(line string) (args []string, stdinFile, stdoutFile, stderrFile string, stdoutAppend bool) {
 
 	// сначала разбиваем на токены с учетом кавычек
 	tokens := tokenizeLine(line)
@@ -360,11 +412,12 @@ func parseCommand(line string) (args []string, stdinFile, stdoutFile, stderrFile
 		} else if token == ">>" && i+1 < len(tokens) {
 			// редирект вывода с добавлением ( >> filename )
 			stdoutFile = tokens[i+1]
+			stdoutAppend = true // запоминаем, что нужен режим добавления
 			i += 2
-			// для >> открываем файл в режиме добавления
+			/*// для >> открываем файл в режиме добавления
 			if file, err := os.OpenFile(stdoutFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
 				file.Close() // сразу закрываем, команда откроет файл заново
-			}
+			}*/
 		} else {
 			// если это не редирект, добавляем токен к аргументам команды
 			cmdTokens = append(cmdTokens, token)
@@ -385,7 +438,7 @@ func parseCommand(line string) (args []string, stdinFile, stdoutFile, stderrFile
 	}
 
 	// возвращаем аргументы команды и имена файлов для редиректов
-	return cmdTokens, stdinFile, stdoutFile, stderrFile
+	return cmdTokens, stdinFile, stdoutFile, stderrFile, stdoutAppend
 }
 
 // tokenizeLine разбивает строку на токены с учетом кавычек
@@ -409,10 +462,13 @@ func tokenizeLine(line string) []string {
 				// значит это конец кавычек
 				inQuotes = false
 			}
-			// записываем кавычку в токен
-			current.WriteByte(ch)
-			// если символ - пробел или табуляция и мы не внутри кавычек
-		} else if !inQuotes && (ch == ' ' || ch == '\t') {
+			// не записываем кавычку в токен
+			continue
+
+		}
+
+		// если символ - пробел или табуляция и мы не внутри кавычек
+		if !inQuotes && (ch == ' ' || ch == '\t') {
 			// если в буфере есть накопленный токен, добавляем его в список
 			if current.Len() > 0 {
 				tokens = append(tokens, current.String())
@@ -435,7 +491,7 @@ func tokenizeLine(line string) []string {
 }
 
 // executeExternalCommand выполняет внешнюю команду
-func executeExternalCommand(shell *Shell, args []string, stdinFile, stdoutFile, stderrFile string) int {
+func executeExternalCommand(shell *Shell, args []string, stdinFile, stdoutFile, stderrFile string, stdoutAppend bool) int {
 
 	// создаём команду для выполнения: первый аргумент - имя программы, остальные - её аргументы
 	cmd := exec.Command(args[0], args[1:]...)
@@ -462,7 +518,13 @@ func executeExternalCommand(shell *Shell, args []string, stdinFile, stdoutFile, 
 
 	// обработка редиректа вывода ( > file )
 	if stdoutFile != "" {
-		file, err := os.Create(stdoutFile)
+		var file *os.File
+		var err error
+		if stdoutAppend {
+			file, err = os.OpenFile(stdoutFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		} else {
+			file, err = os.Create(stdoutFile)
+		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ошибка создания файла %s: %v\n", stdoutFile, err)
 			// если stdin файл был открыт, он закроется в defer
@@ -535,7 +597,7 @@ func executePipeline(shell *Shell, pipeline string) int {
 		// убираем пробелы вокруг команды
 		cmdStr = strings.TrimSpace(cmdStr)
 		// получаем аргументы и файлы для редиректов
-		args, stdinFile, stdoutFile, stderrFile := parseCommand(cmdStr)
+		args, stdinFile, stdoutFile, stderrFile, stdoutAppend := parseCommand(cmdStr)
 		// если команда пустая (например, "|" или "||"), выдаём ошибку
 		if len(args) == 0 {
 			fmt.Fprintln(os.Stderr, "ошибка: пустая команда в конвейере")
@@ -584,7 +646,13 @@ func executePipeline(shell *Shell, pipeline string) int {
 			// для последней команды в пайплайне
 			if stdoutFile != "" {
 				// если указан редирект вывода в файл
-				file, err := os.Create(stdoutFile)
+				var file *os.File
+				var err error
+				if stdoutAppend {
+					file, err = os.OpenFile(stdoutFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+				} else {
+					file, err = os.Create(stdoutFile)
+				}
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "ошибка создания файла: %v\n", err)
 					return 1
