@@ -1,13 +1,20 @@
 package loader
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
+	"mywget/pkg/filesystem"
+	"mywget/pkg/linkprocessor"
+	"mywget/pkg/parser"
 	"mywget/pkg/queue"
 )
 
@@ -158,11 +165,129 @@ func (l *Loader) processTask(task queue.Task, workerID int) {
 	fmt.Printf("[Воркер %d] Начинаю загрузку: %s (тип: %s, глубина: %d)\n",
 		workerID, task.URL, task.Type, task.Depth)
 
-	// TODO: Здесь будет реальная загрузка
-	// временная заглушка
-	time.Sleep(100 * time.Millisecond)
+	// выполняем запрос
+	req, err := http.NewRequestWithContext(l.ctx, "GET", task.URL, nil)
+	if err != nil {
+		fmt.Printf("[Воркер %d] Ошибка создания запроса: %v\n", workerID, err)
+		return
+	}
 
-	fmt.Printf("[Воркер %d] Загружено: %s\n", workerID, task.URL)
+	resp, err := l.client.Do(req)
+	if err != nil {
+		fmt.Printf("[Воркер %d] Ошибка загрузки: %v\n", workerID, err)
+		return
+	}
+	defer resp.Body.Close()
+
+	// проверяем статус
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("[Воркер %d] Пропускаем, статус: %s\n", workerID, resp.Status)
+		return
+	}
+
+	// читаем тело
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("[Воркер %d] Ошибка чтения тела: %v\n", workerID, err)
+		return
+	}
+
+	// определяем Content-Type
+	contentType := resp.Header.Get("Content-Type")
+	mimeType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mimeType = contentType
+	}
+
+	// сохраняем файл
+	bodyReader := bytes.NewReader(bodyBytes)
+	localPath, err := filesystem.SaveFile(task.URL, l.baseURL, bodyReader, mimeType)
+	if err != nil {
+		fmt.Printf("[Воркер %d] Ошибка сохранения: %v\n", workerID, err)
+		return
+	}
+
+	fmt.Printf("[Воркер %d] Сохранен: %s -> %s\n", workerID, task.URL, localPath)
+
+	// если это HTML и глубина позволяет, парсим и добавляем ссылки
+	if mimeType == "text/html" && task.Depth < l.maxDepth {
+		// заменяем ссылки в HTML на локальные
+		pageURL, _ := url.Parse(task.URL)
+		newBodyBytes, err := linkprocessor.ReplaceLinks(bodyBytes, pageURL, l.baseURL)
+		if err != nil {
+			fmt.Printf("[Воркер %d] Ошибка замены ссылок: %v\n", workerID, err)
+			return
+		}
+
+		// перезаписываем файл с замененными ссылками
+		newBodyReader := bytes.NewReader(newBodyBytes)
+		localPath, err = filesystem.SaveFile(task.URL, l.baseURL, newBodyReader, mimeType)
+		if err != nil {
+			fmt.Printf("[Воркер %d] Ошибка перезаписи файла: %v\n", workerID, err)
+			return
+		}
+
+		// парсим ссылки из исходного HTML (до замены)
+		pageLinks, resourceLinks, err := parser.ExtractLinks(pageURL, bytes.NewReader(bodyBytes))
+		if err != nil {
+			fmt.Printf("[Воркер %d] Ошибка парсинга HTML: %v\n", workerID, err)
+			return
+		}
+
+		// добавляем ресурсы (глубина не увеличивается)
+		for _, resURL := range resourceLinks {
+			if !l.isSameDomain(resURL) {
+				continue
+			}
+			if _, visited := l.visited.Load(resURL); visited {
+				continue
+			}
+			resType := l.getResourceType(resURL)
+			l.loadQueue.Push(queue.Task{
+				URL:   resURL,
+				Depth: task.Depth,
+				Type:  resType,
+			})
+		}
+
+		// добавляем страницы (глубина +1)
+		for _, pageURL := range pageLinks {
+			if !l.isSameDomain(pageURL) {
+				continue
+			}
+			if _, visited := l.visited.Load(pageURL); visited {
+				continue
+			}
+			l.loadQueue.Push(queue.Task{
+				URL:   pageURL,
+				Depth: task.Depth + 1,
+				Type:  "html",
+			})
+		}
+	}
+}
+
+// getResourceType определяет тип ресурса по URL
+func (l *Loader) getResourceType(urlStr string) string {
+
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return "unknown"
+	}
+
+	path := strings.ToLower(u.Path)
+
+	if strings.HasSuffix(path, ".css") {
+		return "css"
+	} else if strings.HasSuffix(path, ".js") {
+		return "js"
+	} else if strings.HasSuffix(path, ".png") || strings.HasSuffix(path, ".jpg") || strings.HasSuffix(path, ".jpeg") || strings.HasSuffix(path, ".gif") || strings.HasSuffix(path, ".svg") {
+		return "image"
+	} else if strings.HasSuffix(path, ".woff") || strings.HasSuffix(path, ".woff2") || strings.HasSuffix(path, ".ttf") || strings.HasSuffix(path, ".eot") {
+		return "font"
+	} else {
+		return "unknown"
+	}
 }
 
 // isSameDomain проверяет, принадлежит ли URL тому же домену
