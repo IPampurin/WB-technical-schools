@@ -49,5 +49,4 @@ func main() {
 		fmt.Printf("Загрузка %s завершилась успешно.\n", url)
 		os.Exit(0)
 	}
-
 }

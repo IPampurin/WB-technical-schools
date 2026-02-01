@@ -47,7 +47,7 @@ func SaveFile(fileURL string, baseURL *url.URL, body io.Reader, contentType stri
 func GetLocalPath(fileURL, baseURL *url.URL, contentType string) (string, error) {
 
 	if fileURL.Hostname() != baseURL.Hostname() {
-		return "", fmt.Errorf("host mismatch: %s != %s", fileURL.Hostname(), baseURL.Hostname())
+		return "", fmt.Errorf("несоответствие хоста: %s != %s", fileURL.Hostname(), baseURL.Hostname())
 	}
 
 	path := fileURL.Path
@@ -60,6 +60,9 @@ func GetLocalPath(fileURL, baseURL *url.URL, contentType string) (string, error)
 			path = path + ".html"
 		}
 	}
+
+	// убираем начальный слэш
+	path = strings.TrimPrefix(path, "/")
 
 	// собираем путь: host + path
 	localPath := filepath.Join(fileURL.Hostname(), path)
