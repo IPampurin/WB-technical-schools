@@ -61,8 +61,8 @@ func GetLocalPath(fileURL, baseURL *url.URL, contentType string) (string, error)
 		}
 	}
 
-	// убираем начальный слэш
-	path = strings.TrimPrefix(path, "/")
+	// удаляем начальные слэши
+	path = strings.TrimLeft(path, "/")
 
 	// собираем путь: host + path
 	localPath := filepath.Join(fileURL.Hostname(), path)
