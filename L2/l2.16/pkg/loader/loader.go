@@ -16,6 +16,7 @@ import (
 	"mywget/pkg/linkprocessor"
 	"mywget/pkg/parser"
 	"mywget/pkg/queue"
+	"mywget/pkg/robots"
 )
 
 // Loader - структура загрузчика, управляющая процессом загрузки ресурса
@@ -27,6 +28,7 @@ type Loader struct {
 	loadQueue *queue.Queue  // очередь для BFS обхода
 	client    *http.Client  // HTTP клиент с таймаутами
 	semaphore chan struct{} // семафор для ограничения параллельных загрузок
+	robot     *robots.Robot //
 	wg        *sync.WaitGroup
 }
 
@@ -63,11 +65,46 @@ func Load(ctx context.Context, startURL string, depth int) error {
 			},
 		},
 		semaphore: make(chan struct{}, 10), // максимум 10 параллельных загрузок
+		robot:     robots.New(),
 		wg:        &sync.WaitGroup{},
 	}
 
-	// 3. запускаем загрузчик
+	// 3. загружаем robots.txt
+	robotsURL := fmt.Sprintf("%s://%s/robots.txt", baseURL.Scheme, baseURL.Hostname())
+	if err := loader.loadRobotsTxt(robotsURL); err != nil {
+		fmt.Printf("Предупреждение: не удалось загрузить robots.txt: %v\n", err)
+	}
+
+	// 4. запускаем загрузчик
 	return loader.run()
+}
+
+// loadRobotsTxt загружает и парсит robots.txt
+func (l *Loader) loadRobotsTxt(robotsURL string) error {
+
+	req, err := http.NewRequestWithContext(l.ctx, "GET", robotsURL, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := l.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("robots.txt недоступен: статус %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024)) // 64KB максимум
+	if err != nil {
+		return err
+	}
+
+	l.robot.Parse(string(body))
+
+	return nil
 }
 
 // run запускает основной цикл загрузки
@@ -142,6 +179,18 @@ func (l *Loader) processTask(task queue.Task, workerID int) {
 		return
 	}
 
+	// проверяем robots.txt
+	parsedURL, err := url.Parse(task.URL)
+	if err != nil {
+		fmt.Printf("[Воркер %d] Ошибка парсинга URL: %v\n", workerID, err)
+		return
+	}
+
+	if !l.robot.IsAllowed("mywget-bot", parsedURL) {
+		fmt.Printf("[Воркер %d] Заблокировано robots.txt: %s\n", workerID, task.URL)
+		return
+	}
+
 	// проверяем глубину
 	if task.Depth > l.maxDepth {
 		fmt.Printf("[Воркер %d] Пропускаем, превышена глубина: %s (глубина %d)\n",
@@ -185,10 +234,26 @@ func (l *Loader) processTask(task queue.Task, workerID int) {
 		return
 	}
 
-	// читаем тело
-	bodyBytes, err := io.ReadAll(resp.Body)
+	// ограничиваем размер загружаемого файла
+	var maxSize int64
+	switch task.Type {
+	case "html", "css", "js":
+		maxSize = 10 * 1024 * 1024 // 10 МБ
+	default:
+		maxSize = 100 * 1024 * 1024 // 100 МБ
+	}
+
+	// читаем тело с ограничением
+	limitedBody := io.LimitReader(resp.Body, maxSize)
+	bodyBytes, err := io.ReadAll(limitedBody)
 	if err != nil {
 		fmt.Printf("[Воркер %d] Ошибка чтения тела: %v\n", workerID, err)
+		return
+	}
+
+	// также проверяем, не превышен ли лимит
+	if resp.ContentLength > maxSize {
+		fmt.Printf("[Воркер %d] Файл слишком большой: %d байт\n", workerID, resp.ContentLength)
 		return
 	}
 
