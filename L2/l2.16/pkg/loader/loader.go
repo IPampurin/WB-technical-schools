@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -15,24 +16,31 @@ import (
 	"mywget/pkg/filesystem"
 	"mywget/pkg/linkprocessor"
 	"mywget/pkg/parser"
-	"mywget/pkg/queue"
 	"mywget/pkg/robots"
 )
 
-// Loader - структура загрузчика, управляющая процессом загрузки ресурса
-type Loader struct {
-	ctx       context.Context
-	baseURL   *url.URL
-	maxDepth  int
-	visited   *sync.Map     // thread-safe мапа посещенных URL
-	loadQueue *queue.Queue  // очередь для BFS обхода
-	client    *http.Client  // HTTP клиент с таймаутами
-	semaphore chan struct{} // семафор для ограничения параллельных загрузок
-	robot     *robots.Robot //
-	wg        *sync.WaitGroup
+// task - задача для загрузки
+type Task struct {
+	URL   string
+	Depth int
+	Type  string // "html", "css", "js", "image", "font"
 }
 
-// Load запускает процесс загрузки сайта
+// loader - структура загрузчика, управляющая процессом загрузки ресурса
+type Loader struct {
+	ctx        context.Context
+	baseURL    *url.URL
+	maxDepth   int
+	visited    *sync.Map       // мапа посещенных URL
+	taskChan   chan Task       // канал задач для воркеров
+	client     *http.Client    // HTTP клиент с таймаутами
+	numWorkers int             // количество обработчиков задач
+	robot      *robots.Robot   // парсер robots.txt
+	wg         *sync.WaitGroup // для воркеров
+	taskWg     *sync.WaitGroup // для отслеживания выполнения задач
+}
+
+// load запускает процесс загрузки сайта
 func Load(ctx context.Context, startURL string, depth int) error {
 
 	// 1. валидируем и парсим URL
@@ -51,11 +59,11 @@ func Load(ctx context.Context, startURL string, depth int) error {
 
 	// 2. создаем экземпляр загрузчика
 	loader := &Loader{
-		ctx:       ctx,
-		baseURL:   baseURL,
-		maxDepth:  depth,
-		visited:   &sync.Map{},
-		loadQueue: queue.New(),
+		ctx:      ctx,
+		baseURL:  baseURL,
+		maxDepth: depth,
+		visited:  &sync.Map{},
+		taskChan: make(chan Task, 1000),
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
@@ -64,15 +72,16 @@ func Load(ctx context.Context, startURL string, depth int) error {
 				IdleConnTimeout:     90 * time.Second,
 			},
 		},
-		semaphore: make(chan struct{}, 10), // максимум 10 параллельных загрузок
-		robot:     robots.New(),
-		wg:        &sync.WaitGroup{},
+		numWorkers: 10,
+		robot:      robots.New(),
+		wg:         &sync.WaitGroup{},
+		taskWg:     &sync.WaitGroup{},
 	}
 
 	// 3. загружаем robots.txt
 	robotsURL := fmt.Sprintf("%s://%s/robots.txt", baseURL.Scheme, baseURL.Hostname())
 	if err := loader.loadRobotsTxt(robotsURL); err != nil {
-		fmt.Printf("Предупреждение: не удалось загрузить robots.txt: %v\n", err)
+		fmt.Printf("предупреждение: не удалось загрузить robots.txt: %v\n", err)
 	}
 
 	// 4. запускаем загрузчик
@@ -110,43 +119,48 @@ func (l *Loader) loadRobotsTxt(robotsURL string) error {
 // run запускает основной цикл загрузки
 func (l *Loader) run() error {
 
-	fmt.Printf("Начинаем загрузку %s (глубина: %d)\n", l.baseURL.String(), l.maxDepth)
-
-	// добавляем начальную страницу в очередь на загрузку
-	l.loadQueue.Push(queue.Task{
-		URL:   l.baseURL.String(),
-		Depth: 0,
-		Type:  "html",
-	})
+	fmt.Printf("начинаем загрузку %s (глубина: %d)\n", l.baseURL.String(), l.maxDepth)
 
 	// запускаем воркеры для параллельной загрузки
-	numWorkers := 5
-	for i := 0; i < numWorkers; i++ {
+	for i := 0; i < l.numWorkers; i++ {
 		l.wg.Add(1)
 		go l.worker(i + 1)
 	}
 
-	// ждем завершения всех воркеров
-	done := make(chan struct{})
+	// ждём завершения всех задач и закрываем канал
 	go func() {
-		l.wg.Wait()
-		close(done)
+		l.taskWg.Wait()
+		close(l.taskChan)
 	}()
 
-	// ожидаем завершения или отмены контекста
+	// добавляем начальную страницу в канал задач
+	l.taskWg.Add(1)
 	select {
-	case <-done:
-		fmt.Println("Загрузка завершена")
-		return nil
+	case l.taskChan <- Task{
+		URL:   l.baseURL.String(),
+		Depth: 0,
+		Type:  "html"}:
 	case <-l.ctx.Done():
-		fmt.Println("Получен сигнал остановки...")
-		// дожидаемся завершения текущих загрузок
+		l.taskWg.Done()
+		close(l.taskChan)
 		l.wg.Wait()
 		return fmt.Errorf("загрузка прервана: %w", l.ctx.Err())
 	}
+
+	// ждем завершения всех воркеров
+	l.wg.Wait()
+
+	// проверяем, не был ли отменен контекст
+	if l.ctx.Err() != nil {
+		return fmt.Errorf("загрузка прервана: %w", l.ctx.Err())
+	}
+
+	fmt.Println("загрузка завершена")
+
+	return nil
 }
 
-// worker обрабатывает задачи из очереди
+// worker обрабатывает задачи из канала
 func (l *Loader) worker(id int) {
 
 	defer l.wg.Done()
@@ -154,83 +168,75 @@ func (l *Loader) worker(id int) {
 	for {
 		select {
 		case <-l.ctx.Done():
-			// контекст отменен, выходим
 			return
-		default:
-			// пытаемся взять задачу из очереди
-			task, ok := l.loadQueue.Pop()
+		case task, ok := <-l.taskChan:
 			if !ok {
-				// очередь пуста, завершаем работу
 				return
 			}
-
-			// обрабатываем задачу
 			l.processTask(task, id)
 		}
 	}
 }
 
 // processTask обрабатывает одну задачу загрузки
-func (l *Loader) processTask(task queue.Task, workerID int) {
+func (l *Loader) processTask(task Task, workerID int) {
+
+	defer l.taskWg.Done() // уменьшаем счетчик задач при завершении
 
 	// проверяем, не посещали ли уже этот URL
 	if _, visited := l.visited.Load(task.URL); visited {
-		fmt.Printf("[Воркер %d] Пропускаем уже посещенный URL: %s\n", workerID, task.URL)
-		return
-	}
-
-	// проверяем robots.txt
-	parsedURL, err := url.Parse(task.URL)
-	if err != nil {
-		fmt.Printf("[Воркер %d] Ошибка парсинга URL: %v\n", workerID, err)
-		return
-	}
-
-	if !l.robot.IsAllowed("mywget-bot", parsedURL) {
-		fmt.Printf("[Воркер %d] Заблокировано robots.txt: %s\n", workerID, task.URL)
+		fmt.Printf("[воркер %d] пропускаем уже посещенный URL: %s\n", workerID, task.URL)
 		return
 	}
 
 	// проверяем глубину
 	if task.Depth > l.maxDepth {
-		fmt.Printf("[Воркер %d] Пропускаем, превышена глубина: %s (глубина %d)\n",
+		fmt.Printf("[воркер %d] пропускаем, превышена глубина: %s (глубина %d)\n",
 			workerID, task.URL, task.Depth)
 		return
 	}
 
 	// проверяем, что URL принадлежит тому же домену
 	if !l.isSameDomain(task.URL) {
-		fmt.Printf("[Воркер %d] Пропускаем внешний домен: %s\n", workerID, task.URL)
+		fmt.Printf("[воркер %d] пропускаем внешний домен: %s\n", workerID, task.URL)
 		return
 	}
 
-	// занимаем слот семафора для ограничения параллелизма
-	l.semaphore <- struct{}{}
-	defer func() { <-l.semaphore }()
+	// проверяем robots.txt
+	parsedURL, err := url.Parse(task.URL)
+	if err != nil {
+		fmt.Printf("[воркер %d] ошибка парсинга URL: %v\n", workerID, err)
+		return
+	}
+
+	if !l.robot.IsAllowed("mywget-bot", parsedURL) {
+		fmt.Printf("[воркер %d] заблокировано robots.txt: %s\n", workerID, task.URL)
+		return
+	}
 
 	// помечаем URL как посещенный
 	l.visited.Store(task.URL, true)
 
-	fmt.Printf("[Воркер %d] Начинаю загрузку: %s (тип: %s, глубина: %d)\n",
+	fmt.Printf("[воркер %d] начинаю загрузку: %s (тип: %s, глубина: %d)\n",
 		workerID, task.URL, task.Type, task.Depth)
 
 	// выполняем запрос
 	req, err := http.NewRequestWithContext(l.ctx, "GET", task.URL, nil)
 	if err != nil {
-		fmt.Printf("[Воркер %d] Ошибка создания запроса: %v\n", workerID, err)
+		fmt.Printf("[воркер %d] ошибка создания запроса: %v\n", workerID, err)
 		return
 	}
 
 	resp, err := l.client.Do(req)
 	if err != nil {
-		fmt.Printf("[Воркер %d] Ошибка загрузки: %v\n", workerID, err)
+		fmt.Printf("[воркер %d] ошибка загрузки: %v\n", workerID, err)
 		return
 	}
 	defer resp.Body.Close()
 
 	// проверяем статус
 	if resp.StatusCode != http.StatusOK {
-		fmt.Printf("[Воркер %d] Пропускаем, статус: %s\n", workerID, resp.Status)
+		fmt.Printf("[воркер %d] пропускаем, статус: %s\n", workerID, resp.Status)
 		return
 	}
 
@@ -247,13 +253,13 @@ func (l *Loader) processTask(task queue.Task, workerID int) {
 	limitedBody := io.LimitReader(resp.Body, maxSize)
 	bodyBytes, err := io.ReadAll(limitedBody)
 	if err != nil {
-		fmt.Printf("[Воркер %d] Ошибка чтения тела: %v\n", workerID, err)
+		fmt.Printf("[воркер %d] ошибка чтения тела: %v\n", workerID, err)
 		return
 	}
 
 	// также проверяем, не превышен ли лимит
 	if resp.ContentLength > maxSize {
-		fmt.Printf("[Воркер %d] Файл слишком большой: %d байт\n", workerID, resp.ContentLength)
+		fmt.Printf("[воркер %d] файл слишком большой: %d байт\n", workerID, resp.ContentLength)
 		return
 	}
 
@@ -268,67 +274,109 @@ func (l *Loader) processTask(task queue.Task, workerID int) {
 	bodyReader := bytes.NewReader(bodyBytes)
 	localPath, err := filesystem.SaveFile(task.URL, l.baseURL, bodyReader, mimeType)
 	if err != nil {
-		fmt.Printf("[Воркер %d] Ошибка сохранения: %v\n", workerID, err)
+		fmt.Printf("[воркер %d] ошибка сохранения: %v\n", workerID, err)
 		return
 	}
 
-	fmt.Printf("[Воркер %d] Сохранен: %s -> %s\n", workerID, task.URL, localPath)
+	fmt.Printf("[воркер %d] сохранен: %s -> %s\n", workerID, task.URL, localPath)
 
-	// если это HTML и глубина позволяет, парсим и добавляем ссылки
-	if mimeType == "text/html" && task.Depth < l.maxDepth {
-		// заменяем ссылки в HTML на локальные
-		pageURL, _ := url.Parse(task.URL)
-		newBodyBytes, err := linkprocessor.ReplaceLinks(bodyBytes, pageURL, l.baseURL)
-		if err != nil {
-			fmt.Printf("[Воркер %d] Ошибка замены ссылок: %v\n", workerID, err)
-			return
-		}
+	// обрабатываем разные типы файлов
+	switch {
+	case mimeType == "text/html":
+		l.processHTMLFile(task, bodyBytes, mimeType, workerID)
+	case mimeType == "text/css":
+		l.processCSSFile(task, bodyBytes, mimeType, workerID)
+	}
+}
 
-		// перезаписываем файл с замененными ссылками
-		newBodyReader := bytes.NewReader(newBodyBytes)
-		localPath, err = filesystem.SaveFile(task.URL, l.baseURL, newBodyReader, mimeType)
-		if err != nil {
-			fmt.Printf("[Воркер %d] Ошибка перезаписи файла: %v\n", workerID, err)
-			return
-		}
+// processHTMLFile обрабатывает HTML файл
+func (l *Loader) processHTMLFile(task Task, bodyBytes []byte, mimeType string, workerID int) {
 
-		// парсим ссылки из исходного HTML (до замены)
+	// заменяем ссылки в HTML на локальные
+	pageURL, _ := url.Parse(task.URL)
+	newBodyBytes, err := linkprocessor.ReplaceLinks(bodyBytes, pageURL, l.baseURL)
+	if err != nil {
+		fmt.Printf("[воркер %d] ошибка замены ссылок: %v\n", workerID, err)
+		return
+	}
+
+	// перезаписываем файл с замененными ссылками
+	newBodyReader := bytes.NewReader(newBodyBytes)
+	localPath, err := filesystem.SaveFile(task.URL, l.baseURL, newBodyReader, mimeType)
+	if err != nil {
+		fmt.Printf("[воркер %d] ошибка перезаписи файла: %v\n", workerID, err)
+		return
+	}
+
+	fmt.Printf("[воркер %d] перезаписан с замененными ссылками: %s\n", workerID, localPath)
+
+	// парсим и добавляем новые ссылки, если не превышена глубина
+	if task.Depth < l.maxDepth {
 		pageLinks, resourceLinks, err := parser.ExtractLinks(pageURL, bytes.NewReader(bodyBytes))
 		if err != nil {
-			fmt.Printf("[Воркер %d] Ошибка парсинга HTML: %v\n", workerID, err)
+			fmt.Printf("[воркер %d] ошибка парсинга HTML: %v\n", workerID, err)
 			return
 		}
 
 		// добавляем ресурсы (глубина не увеличивается)
 		for _, resURL := range resourceLinks {
-			if !l.isSameDomain(resURL) {
-				continue
-			}
-			if _, visited := l.visited.Load(resURL); visited {
-				continue
-			}
-			resType := l.getResourceType(resURL)
-			l.loadQueue.Push(queue.Task{
-				URL:   resURL,
-				Depth: task.Depth,
-				Type:  resType,
-			})
+			l.addTask(resURL, task.Depth, l.getResourceType(resURL))
 		}
 
 		// добавляем страницы (глубина +1)
 		for _, pageURL := range pageLinks {
-			if !l.isSameDomain(pageURL) {
-				continue
-			}
-			if _, visited := l.visited.Load(pageURL); visited {
-				continue
-			}
-			l.loadQueue.Push(queue.Task{
-				URL:   pageURL,
-				Depth: task.Depth + 1,
-				Type:  "html",
-			})
+			l.addTask(pageURL, task.Depth+1, "html")
 		}
+	}
+}
+
+// processCSSFile обрабатывает CSS файл
+func (l *Loader) processCSSFile(task Task, bodyBytes []byte, mimeType string, workerID int) {
+
+	// заменяем ссылки в CSS на локальные
+	pageURL, _ := url.Parse(task.URL)
+	newBodyBytes, err := linkprocessor.ReplaceCSSLinks(bodyBytes, pageURL, l.baseURL)
+	if err != nil {
+		fmt.Printf("[воркер %d] ошибка замены ссылок в CSS: %v\n", workerID, err)
+		return
+	}
+
+	// перезаписываем файл с замененными ссылками
+	newBodyReader := bytes.NewReader(newBodyBytes)
+	localPath, err := filesystem.SaveFile(task.URL, l.baseURL, newBodyReader, mimeType)
+	if err != nil {
+		fmt.Printf("[воркер %d] ошибка перезаписи CSS файла: %v\n", workerID, err)
+		return
+	}
+
+	fmt.Printf("[воркер %d] перезаписан CSS с замененными ссылками: %s\n", workerID, localPath)
+
+	// извлекаем ссылки из CSS и добавляем их как задачи
+	cssLinks := parser.ExtractCSSLinks(string(bodyBytes), pageURL)
+	for _, cssLink := range cssLinks {
+		l.addTask(cssLink, task.Depth, l.getResourceType(cssLink))
+	}
+}
+
+// addTask добавляет новую задачу в канал
+func (l *Loader) addTask(url string, depth int, resType string) {
+
+	if !l.isSameDomain(url) {
+		return
+	}
+
+	if _, visited := l.visited.Load(url); visited {
+		return
+	}
+
+	select {
+	case l.taskChan <- Task{
+		URL:   url,
+		Depth: depth,
+		Type:  resType}:
+		l.taskWg.Add(1)
+	case <-l.ctx.Done():
+		return
 	}
 }
 
@@ -341,16 +389,24 @@ func (l *Loader) getResourceType(urlStr string) string {
 	}
 
 	path := strings.ToLower(u.Path)
-
-	if strings.HasSuffix(path, ".css") {
+	switch {
+	case strings.HasSuffix(path, ".css"):
 		return "css"
-	} else if strings.HasSuffix(path, ".js") {
+	case strings.HasSuffix(path, ".js"):
 		return "js"
-	} else if strings.HasSuffix(path, ".png") || strings.HasSuffix(path, ".jpg") || strings.HasSuffix(path, ".jpeg") || strings.HasSuffix(path, ".gif") || strings.HasSuffix(path, ".svg") {
+	case strings.HasSuffix(path, ".png"), strings.HasSuffix(path, ".jpg"),
+		strings.HasSuffix(path, ".jpeg"), strings.HasSuffix(path, ".gif"),
+		strings.HasSuffix(path, ".svg"), strings.HasSuffix(path, ".webp"),
+		strings.HasSuffix(path, ".ico"), strings.HasSuffix(path, ".bmp"):
 		return "image"
-	} else if strings.HasSuffix(path, ".woff") || strings.HasSuffix(path, ".woff2") || strings.HasSuffix(path, ".ttf") || strings.HasSuffix(path, ".eot") {
+	case strings.HasSuffix(path, ".woff"), strings.HasSuffix(path, ".woff2"),
+		strings.HasSuffix(path, ".ttf"), strings.HasSuffix(path, ".eot"),
+		strings.HasSuffix(path, ".otf"):
 		return "font"
-	} else {
+	case strings.HasSuffix(path, ".html"), strings.HasSuffix(path, ".htm"),
+		path == "" || !strings.Contains(filepath.Base(path), "."):
+		return "html"
+	default:
 		return "unknown"
 	}
 }

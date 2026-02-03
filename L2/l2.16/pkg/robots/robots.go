@@ -6,13 +6,13 @@ import (
 	"sync"
 )
 
-// Robot - парсер robots.txt
+// robot - парсер robots.txt
 type Robot struct {
 	rules map[string][]string // правила: user-agent -> запрещенные пути
 	mu    sync.RWMutex
 }
 
-// New создает новый экземпляр Robot
+// new создает новый экземпляр Robot
 func New() *Robot {
 
 	return &Robot{
@@ -20,7 +20,7 @@ func New() *Robot {
 	}
 }
 
-// Parse парсит файл robots.txt
+// parse парсит файл robots.txt
 func (r *Robot) Parse(robotsContent string) {
 
 	r.mu.Lock()
@@ -56,7 +56,7 @@ func (r *Robot) Parse(robotsContent string) {
 	}
 }
 
-// IsAllowed проверяет, разрешен ли данный URL для указанного user-agent
+// isAllowed проверяет, разрешен ли данный URL для указанного user-agent
 func (r *Robot) IsAllowed(agent string, url *url.URL) bool {
 
 	r.mu.RLock()

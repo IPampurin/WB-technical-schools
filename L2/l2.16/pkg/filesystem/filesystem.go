@@ -51,20 +51,40 @@ func GetLocalPath(fileURL, baseURL *url.URL, contentType string) (string, error)
 	}
 
 	path := fileURL.Path
+	query := fileURL.RawQuery
+
 	// если путь пустой или заканчивается на / — добавляем index.html
 	if path == "" || strings.HasSuffix(path, "/") {
 		path = path + "index.html"
 	} else {
-		// если это HTML-страница без расширения — добавляем .html
-		if strings.Contains(contentType, "text/html") && !strings.Contains(filepath.Base(path), ".") {
+		// определяем, нужно ли добавлять расширение .html
+		ext := filepath.Ext(path)
+		if ext == "" && strings.Contains(contentType, "text/html") {
 			path = path + ".html"
 		}
 	}
 
-	// удаляем начальные слэши
-	path = strings.TrimLeft(path, "/")
+	// кодируем query параметры в имя файла, если они есть
+	if query != "" {
+		// заменяем недопустимые символы
+		encodedQuery := strings.ReplaceAll(query, "?", "_")
+		encodedQuery = strings.ReplaceAll(encodedQuery, "&", "_")
+		encodedQuery = strings.ReplaceAll(encodedQuery, "=", "-")
 
-	// собираем путь: host + path
+		// добавляем query к имени файла
+		dir, file := filepath.Split(path)
+		name := strings.TrimSuffix(file, filepath.Ext(file))
+		ext := filepath.Ext(file)
+		path = filepath.Join(dir, name+"_"+encodedQuery+ext)
+	}
+
+	// убираем начальные слэши и создаем безопасный путь
+	path = strings.TrimLeft(path, "/")
+	if path == "" {
+		path = "index.html"
+	}
+
+	// создаем путь: host/path
 	localPath := filepath.Join(fileURL.Hostname(), path)
 	localPath = filepath.Clean(localPath)
 

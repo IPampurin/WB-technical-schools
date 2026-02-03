@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
-
-	"mywget/pkg/filesystem"
 
 	"golang.org/x/net/html"
 )
@@ -46,6 +45,46 @@ func ReplaceLinks(htmlContent []byte, pageURL, baseURL *url.URL) ([]byte, error)
 	}
 
 	return buf.Bytes(), nil
+}
+
+// ReplaceCSSLinks заменяет все ссылки в CSS на локальные
+func ReplaceCSSLinks(cssContent []byte, pageURL, baseURL *url.URL) ([]byte, error) {
+
+	cssStr := string(cssContent)
+
+	// заменяем url()
+	re := regexp.MustCompile(`url\(\s*['"]?([^'"()]+)['"]?\s*\)`)
+	result := re.ReplaceAllStringFunc(cssStr, func(match string) string {
+		// извлекаем URL из url()
+		submatch := re.FindStringSubmatch(match)
+		if len(submatch) < 2 {
+			return match
+		}
+
+		link := submatch[1]
+		// игнорируем data: URL и хэши
+		if strings.HasPrefix(link, "data:") || strings.HasPrefix(link, "#") {
+			return match
+		}
+
+		newLink := replaceLink(link, pageURL, baseURL)
+		return strings.Replace(match, link, newLink, 1)
+	})
+
+	// заменяем @import
+	importRe := regexp.MustCompile(`@import\s+(?:url\()?['"]?([^'"()]+)['"]?(?:\))?`)
+	result = importRe.ReplaceAllStringFunc(result, func(match string) string {
+		submatch := importRe.FindStringSubmatch(match)
+		if len(submatch) < 2 {
+			return match
+		}
+
+		link := submatch[1]
+		newLink := replaceLink(link, pageURL, baseURL)
+		return strings.Replace(match, link, newLink, 1)
+	})
+
+	return []byte(result), nil
 }
 
 // replaceAttr заменяет ссылку в атрибуте
@@ -92,24 +131,91 @@ func replaceLink(link string, pageURL, baseURL *url.URL) string {
 	}
 
 	// вычисляем локальный путь для абсолютного URL
-	// (для замены ссылок не важно, HTML это или нет, поэтому передаем пустой contentType)
-	localPath, err := filesystem.GetLocalPath(absoluteURL, baseURL, "")
+	localPath, err := getLocalPath(absoluteURL, baseURL)
 	if err != nil {
 		return link
 	}
 
-	// вычисляем относительный путь от текущей страницы до локального пути
-	currentPageLocalPath, err := filesystem.GetLocalPath(pageURL, baseURL, "")
+	// вычисляем локальный путь для текущей страницы
+	currentPageLocalPath, err := getLocalPath(pageURL, baseURL)
 	if err != nil {
 		return link
 	}
 
+	// вычисляем относительный путь от текущей страницы до ресурса
 	relativePath, err := getRelativePath(currentPageLocalPath, localPath)
 	if err != nil {
 		return link
 	}
 
 	return relativePath
+}
+
+// getLocalPath возвращает локальный путь для URL (без домена)
+func getLocalPath(fileURL, baseURL *url.URL) (string, error) {
+
+	if fileURL.Hostname() != baseURL.Hostname() {
+		return "", fmt.Errorf("host mismatch")
+	}
+
+	path := fileURL.Path
+	query := fileURL.RawQuery
+
+	// если путь пустой или заканчивается на / — добавляем index.html
+	if path == "" || strings.HasSuffix(path, "/") {
+		path = path + "index.html"
+	}
+
+	// убираем начальный слэш
+	if strings.HasPrefix(path, "/") {
+		path = path[1:]
+	}
+
+	// кодируем query параметры в имя файла, если они есть
+	if query != "" {
+		// заменяем недопустимые символы
+		encodedQuery := strings.ReplaceAll(query, "?", "_")
+		encodedQuery = strings.ReplaceAll(encodedQuery, "&", "_")
+		encodedQuery = strings.ReplaceAll(encodedQuery, "=", "-")
+
+		// добавляем query к имени файла
+		dir, file := filepath.Split(path)
+		name := strings.TrimSuffix(file, filepath.Ext(file))
+		ext := filepath.Ext(file)
+		path = filepath.Join(dir, name+"_"+encodedQuery+ext)
+	}
+
+	return path, nil
+}
+
+// getRelativePath возвращает относительный путь от source к target
+func getRelativePath(source, target string) (string, error) {
+
+	// используем filepath для корректной работы с путями в текущей ОС
+	// затем преобразуем разделители в / для веба
+
+	// определяем директорию исходного файла
+	sourceDir := filepath.Dir(source)
+	if sourceDir == "." {
+		sourceDir = ""
+	}
+
+	// вычисляем относительный путь
+	rel, err := filepath.Rel(sourceDir, target)
+	if err != nil {
+		return "", err
+	}
+
+	// заменяем разделители пути на / для веба
+	rel = filepath.ToSlash(rel)
+
+	// если результат пустой или начинается с .., оставляем как есть
+	// иначе добавляем ./ для файлов в той же директории
+	if rel != "" && !strings.HasPrefix(rel, ".") && !strings.HasPrefix(rel, "/") {
+		rel = "./" + rel
+	}
+
+	return rel, nil
 }
 
 // replaceSrcset заменяет ссылки в атрибуте srcset
@@ -142,10 +248,9 @@ func replaceStyleContent(n *html.Node, pageURL, baseURL *url.URL) {
 // replaceCSSUrls заменяет url() в CSS
 func replaceCSSUrls(css string, pageURL, baseURL *url.URL) string {
 
-	// просто заменяем (можно улучшить с помощью парсера CSS ?)
-	// ищем все вхождения url(...)
 	start := 0
 	var result strings.Builder
+
 	for {
 		idx := strings.Index(css[start:], "url(")
 		if idx == -1 {
@@ -174,27 +279,4 @@ func replaceCSSUrls(css string, pageURL, baseURL *url.URL) string {
 	}
 
 	return result.String()
-}
-
-// getRelativePath возвращает относительный путь от source к target
-func getRelativePath(source, target string) (string, error) {
-
-	// source и target должны быть абсолютными путями относительно корня сайта
-	// например: source = "example.com/path/to/index.html", target = "example.com/static/style.css"
-	// нужно убрать общий префикс (домен) и вычислить относительный путь
-
-	// разделяем на компоненты
-	sourceDir := filepath.Dir(source)
-	targetFile := target
-
-	// вычисляем относительный путь
-	rel, err := filepath.Rel(sourceDir, targetFile)
-	if err != nil {
-		return "", err
-	}
-
-	// заменяем разделители пути на / для веба
-	rel = filepath.ToSlash(rel)
-
-	return rel, nil
 }
