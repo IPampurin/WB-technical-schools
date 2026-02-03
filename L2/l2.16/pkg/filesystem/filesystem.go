@@ -57,9 +57,9 @@ func GetLocalPath(fileURL, baseURL *url.URL, contentType string) (string, error)
 	if path == "" || strings.HasSuffix(path, "/") {
 		path = path + "index.html"
 	} else {
-		// определяем, нужно ли добавлять расширение .html
-		ext := filepath.Ext(path)
-		if ext == "" && strings.Contains(contentType, "text/html") {
+		// ВСЕГДА добавляем .html для HTML-страниц без расширения
+		// Это нужно для корректной работы в браузере
+		if strings.Contains(contentType, "text/html") && !strings.Contains(filepath.Base(path), ".") {
 			path = path + ".html"
 		}
 	}

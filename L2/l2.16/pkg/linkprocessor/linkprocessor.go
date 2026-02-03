@@ -164,21 +164,23 @@ func getLocalPath(fileURL, baseURL *url.URL) (string, error) {
 	// если путь пустой или заканчивается на / — добавляем index.html
 	if path == "" || strings.HasSuffix(path, "/") {
 		path = path + "index.html"
+	} else {
+		// Для HTML-страниц без расширения ВСЕГДА добавляем .html
+		// Проверяем по расширению - если нет точки, это HTML-страница
+		if !strings.Contains(filepath.Base(path), ".") {
+			path = path + ".html"
+		}
 	}
 
 	// убираем начальный слэш
-	if strings.HasPrefix(path, "/") {
-		path = path[1:]
-	}
+	path = strings.TrimPrefix(path, "/")
 
 	// кодируем query параметры в имя файла, если они есть
 	if query != "" {
-		// заменяем недопустимые символы
 		encodedQuery := strings.ReplaceAll(query, "?", "_")
 		encodedQuery = strings.ReplaceAll(encodedQuery, "&", "_")
 		encodedQuery = strings.ReplaceAll(encodedQuery, "=", "-")
 
-		// добавляем query к имени файла
 		dir, file := filepath.Split(path)
 		name := strings.TrimSuffix(file, filepath.Ext(file))
 		ext := filepath.Ext(file)
