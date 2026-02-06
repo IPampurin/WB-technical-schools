@@ -4,68 +4,79 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"net"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 )
 
-/*
-Примеры серверов для теста:
-smtp.mail.ru:25 (может быть заблокирован)
-smtp.mail.ru:587
-smtp.yandex.ru:587
-echo.websocket.org:80 - WebSocket echo
-*/
 const (
-	hostDefault    = "echo.websocket.org"
-	portDefault    = "80"
-	timeOutDefault = 10 * time.Second
-	networkDefault = "tcp"
+	hostDefault    = "tcpbin.com"     // хост по умолчанию для теста
+	portDefault    = "4242"           // порт по умолчанию для теста
+	timeoutDefault = 10 * time.Second // таймаут по умолчанию
+	networkDefault = "tcp"            // протокол по умолчанию
 )
 
-// Config хранит параметры, задаваемые пользователем при запуске клиента
-type Config struct {
-	network string
-	host    string
-	port    string
-	timeOut time.Time
+// startRead возвращает хост:порт и таймаут назначенные при запуске, либо по умолчанию
+func startRead() (string, time.Duration) {
+
+	// функция комментариев
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Использование: %s [--timeout=10s] [хост порт]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Примеры:\n")
+		fmt.Fprintf(os.Stderr, "  %s --timeout=10s tcpbin.com 4242\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s tcpbin.com 4242 (использует значение по умолчанию: --timeout=%v)\n",
+			os.Args[0], timeoutDefault)
+		fmt.Fprintf(os.Stderr, "  %s (использует значения по умолчанию: --timeout=%v %s:%s)\n",
+			os.Args[0], timeoutDefault, hostDefault, portDefault)
+	}
+
+	// устанавливаем значения по умолчанию
+	host := hostDefault
+	port := portDefault
+
+	// парсим ввод команды
+	timeout := flag.Duration("timeout", timeoutDefault, "Таймаут соединения")
+
+	// парсим флаг
+	flag.Parse()
+
+	// получаем позиционные аргументы
+	args := flag.Args()
+
+	// обрабатываем переданные аргументы
+	switch len(args) {
+	// ничего не передано - используем значения по умолчанию
+	case 0:
+		fmt.Printf("Используются значения по умолчанию: --timeout=%v %s:%s\n", timeout, host, port)
+	// только хост и порт
+	case 2:
+		host = args[0]
+		port = args[1]
+	// слишком много аргументов
+	default:
+		fmt.Fprintf(os.Stderr, "Ошибка: слишком много аргументов.\n")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	// формируем адрес
+	address := net.JoinHostPort(host, port)
+
+	return address, *timeout
 }
 
 // Client - telnet клиент
 type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	conn   *net.Conn
-	Config
+	conn   net.Conn
 }
 
-// newClient возвращает экземпляр клиента
-func newClient() *Client {
-
-	return &Client{}
-}
-
-func main() {
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	host := hostDefault
-	port := portDefault
-	timeOut := timeOutDefault
-	network := networkDefault
-
-	address := host + ":" + port
-	conn, err := net.DialTimeout(network, address, timeOut)
-	if err != nil {
-		fmt.Printf("Не удалось подключиться по указанному адресу %s, ошибка:%v.\n", address, err)
-		return
-	}
-	defer conn.Close()
+func sigScan(ctx context.Context, cancel context.CancelFunc) {
 
 	// заводим и регистрируем канал для обработки Ctrl+C
 	sigChan := make(chan os.Signal, 1)
@@ -85,23 +96,49 @@ func main() {
 			}
 		}
 	}()
-
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go readInputAndSend(ctx, conn, &wg) // считываем консоль и отправляем данные
-
-	wg.Add(1)
-	go writeMessage(ctx, conn, &wg) // выводим в консоль пришедшее
-
-	wg.Wait()
 }
 
-func readInputAndSend(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
+func main() {
 
-	defer func() {
-		wg.Done()
-	}()
+	address, timeout := startRead()
+
+	// устанавливаем соединение
+	conn, err := net.DialTimeout(networkDefault, address, timeout)
+	if err != nil {
+		fmt.Printf("Не удалось подключиться по указанному адресу %s, ошибка:%v.\n", address, err)
+		return
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// запускаем обработку сигналов отмены
+	go sigScan(ctx, cancel)
+
+	// определяем экземпляр клиента
+	client := Client{
+		ctx:    ctx,
+		cancel: cancel,
+		conn:   conn,
+	}
+
+	// запускаем горутину считывания консоли
+	go readInputAndSend(ctx, conn)
+
+	// вычитываем данные из соединения
+	scanner := bufio.NewScanner(conn)
+	w := bufio.NewWriter(os.Stdout)
+
+	for scanner.Scan() {
+		fmt.Fprint(w, "\n"+string(scanner.Bytes())+"\n")
+		w.Flush()
+	}
+
+	fmt.Println("Программа завершена.")
+}
+
+func readInputAndSend(ctx context.Context, conn net.Conn) {
 
 	scanner := bufio.NewScanner(os.Stdin)
 
@@ -131,11 +168,28 @@ func readInputAndSend(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
 					return
 				}
 			}
+
+			fmt.Println("Сообщение ", scanner.Text(), " отправлено.")
 		}
 	}
 }
 
-func sendToServerWithRetry(conn net.Conn, data []byte) error {
+/*
+// newClient возвращает экземпляр клиента
+func newClient(conn *net.Conn) *Client {
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		return &Client{
+			ctx:    ctx,
+			cancel: cancel,
+			conn:   *conn,
+		}
+	}
+*/
+
+/*
+func sendToServerWithRetry(data []byte) error {
 
 	_, err := conn.Write(data)
 	if err == nil {
@@ -152,16 +206,4 @@ func sendToServerWithRetry(conn net.Conn, data []byte) error {
 
 	return nil
 }
-
-func writeMessage(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
-
-	defer wg.Done()
-
-	scanner := bufio.NewScanner(conn)
-	w := bufio.NewWriter(os.Stdout)
-
-	for scanner.Scan() {
-		fmt.Fprint(w, "\n"+string(scanner.Bytes())+"\n")
-		w.Flush()
-	}
-}
+*/
