@@ -3,13 +3,12 @@ package main
 import (
 	"bufio"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -71,6 +70,7 @@ func startRead() (string, time.Duration) {
 	return address, *timeout
 }
 
+// sigScan слушает сигналы отмены
 func sigScan(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup) {
 
 	defer wg.Done()
@@ -78,18 +78,16 @@ func sigScan(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup)
 	// заводим и регистрируем канал для обработки Ctrl+C
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT)
+	defer signal.Stop(sigChan)
 
-	for {
-		select {
-		case <-ctx.Done():
-			signal.Stop(sigChan)
-			fmt.Println("sigScan: Отмена контекста.")
-			return
-		case sig := <-sigChan:
-			fmt.Printf("sigScan: Сигнал завершения программы: %v.\n", sig)
-			cancel()
-			return
-		}
+	select {
+	case <-ctx.Done():
+		fmt.Println("sigScan: Отмена контекста.")
+		return
+	case sig := <-sigChan:
+		fmt.Printf("sigScan: Сигнал завершения программы: %v.\n", sig)
+		cancel()
+		return
 	}
 }
 
@@ -106,6 +104,9 @@ func main() {
 	}
 	defer conn.Close()
 
+	fmt.Printf("Подключено к %s\n", address)
+	fmt.Println("Ctrl+D для выхода, Ctrl+C для прерывания")
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -114,14 +115,7 @@ func main() {
 	// запускаем обработку сигналов отмены
 	wg.Add(1)
 	go sigScan(ctx, cancel, &wg)
-	/*
-		// определяем экземпляр клиента
-		client := Client{
-			ctx:    ctx,
-			cancel: cancel,
-			conn:   conn,
-		}
-	*/
+
 	// запускаем горутину считывания консоли
 	wg.Add(1)
 	go inputReadAndSend(ctx, cancel, conn, &wg)
@@ -139,9 +133,17 @@ func main() {
 // inputReadAndSend читает из консоли и отправляет серверу
 func inputReadAndSend(ctx context.Context, cancel context.CancelFunc, conn net.Conn, wg *sync.WaitGroup) {
 
-	defer wg.Done()
+	defer func() {
+		wg.Done()
+		conn.Close()
+	}()
 
-	scanner := bufio.NewScanner(os.Stdin)
+	r := bufio.NewReader(os.Stdin)
+	w := bufio.NewWriter(conn)
+
+	rw := bufio.NewReadWriter(r, w)
+
+	buf := make([]byte, 1024) // буфер
 
 	for {
 		select {
@@ -151,35 +153,29 @@ func inputReadAndSend(ctx context.Context, cancel context.CancelFunc, conn net.C
 			return
 		// либо считываем консоль и отправляем данные серверу
 		default:
-			// выводим приглашение командной строки
-			fmt.Print("Данные для отправки серверу: ")
-
-			if !scanner.Scan() {
-				if err := scanner.Err(); err != nil {
-					fmt.Fprintf(os.Stderr, "inputReadAndSend: Ошибка чтения из консоли: %v\n", err)
-					continue
+			n, err := rw.Read(buf)
+			if err != nil {
+				if err == io.EOF {
+					// если словили io.EOF, значит получили Ctrl+D
+					fmt.Println("\ninputReadAndSend: Выход из программы.")
+					rw.Flush() // сбрасываем буфер для порядка
+					cancel()
+					return
 				}
-				// Ctrl+D (Ctrl+Z+Enter для Win) даёт io.EOF (при этом scanner.Scan() == false, а err == nil),
-				// что воспринимаем как сигнал к остановке программы
-				fmt.Println("\ninputReadAndSend: Выход из программы.")
+				fmt.Fprintf(os.Stderr, "inputReadAndSend: Ошибка чтения из консоли: %v\n", err)
+				rw.Flush() // сбрасываем буфер для порядка
 				cancel()
 				return
 			}
 
-			message := scanner.Text()
-			// добавляем \r\n для совместимости с большинством протоколов
-			// (HTTP, SMTP, FTP и др. требуют \r\n)
-			if !strings.HasSuffix(message, "\n") {
-				message += "\r\n"
+			// если ошибок нет, пишем в conn
+			_, err = rw.Write(buf[:n])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "inputReadAndSend: Ошибка записи в соединение: %v\n", err)
+				return
 			}
 
-			if _, err := conn.Write([]byte(message)); err != nil {
-				if errors.Is(err, net.ErrClosed) || errors.Is(err, os.ErrClosed) {
-					fmt.Fprintf(os.Stderr, "inputReadAndSend: Соединение прервано, ошибка: %v\n", err)
-					cancel()
-					return
-				}
-			}
+			rw.Flush() // сбрасываем буфер
 		}
 	}
 }
@@ -187,71 +183,48 @@ func inputReadAndSend(ctx context.Context, cancel context.CancelFunc, conn net.C
 // serverReadAndWrite принимает данные с сервера и выводит в консоль
 func serverReadAndWrite(ctx context.Context, cancel context.CancelFunc, conn net.Conn, wg *sync.WaitGroup) {
 
-	defer wg.Done()
+	defer func() {
+		wg.Done()
+		conn.Close()
+	}()
 
-	// reader := bufio.NewReader(conn)
-
-	scanner := bufio.NewScanner(conn)
+	r := bufio.NewReader(conn)
 	w := bufio.NewWriter(os.Stdout)
+
+	rw := bufio.NewReadWriter(r, w)
+
+	buf := make([]byte, 1024) // буфер
 
 	for {
 		select {
 		// либо прерываемся по отмене контекста
 		case <-ctx.Done():
-			fmt.Println("serverReadAndWrite: Отмена контекста, завершение чтения данных от сервера.")
+			fmt.Println("serverReadAndWrite: Отмена контекста, завершение чтения соединения.")
 			return
 		// либо считываем данные с сервера и выводим в Stdout
 		default:
-			if !scanner.Scan() {
-				if err := scanner.Err(); err != nil {
-					fmt.Fprintf(os.Stderr, "serverReadAndWrite: Ошибка чтения данных от сервера: %v\n", err)
-					cancel()
-					return
+			n, err := rw.Read(buf)
+			if err != nil {
+				if err == io.EOF {
+					fmt.Println("serverReadAndWrite: Соединение закрыто сервером.")
+				} else {
+					fmt.Fprintf(os.Stderr, "serverReadAndWrite: Ошибка чтения соединения: %v\n", err)
 				}
-				// io.EOF == закрытие соединения (err == nil),
-				// что воспринимаем как сигнал к остановке программы
-				fmt.Println("\nserverReadAndWrite: Сервер закрыл соединение.")
-				fmt.Println("serverReadAndWrite: Выход из программы.")
+				rw.Flush() // сбрасываем буфер для порядка
 				cancel()
 				return
 			}
 
-			fmt.Fprintf(w, "Сервер: %s\n", string(scanner.Bytes()))
-			w.Flush()
+			// если ошибок нет, пишем в Stdout
+			_, err = rw.Write(buf[:n])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "serverReadAndWrite: Ошибка вывода в Stdout: %v\n", err)
+				rw.Flush() // сбрасываем буфер для порядка
+				cancel()
+				return
+			}
+
+			rw.Flush() // сбрасываем буфер
 		}
 	}
 }
-
-/*
-// newClient возвращает экземпляр клиента
-func newClient(conn *net.Conn) *Client {
-
-		ctx, cancel := context.WithCancel(context.Background())
-
-		return &Client{
-			ctx:    ctx,
-			cancel: cancel,
-			conn:   *conn,
-		}
-	}
-*/
-
-/*
-func sendToServerWithRetry(data []byte) error {
-
-	_, err := conn.Write(data)
-	if err == nil {
-		return nil
-	}
-
-	if errors.Is(err, net.ErrClosed) || errors.Is(err, os.ErrClosed) {
-
-	}
-
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Ошибка отправки сообщения : %v\n", err)
-	}
-
-	return nil
-}
-*/
