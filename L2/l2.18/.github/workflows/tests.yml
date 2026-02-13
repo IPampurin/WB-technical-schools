@@ -1,0 +1,37 @@
+name: calendar-server CI
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go with cache
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.x'
+        cache: true
+    
+    - name: Display Go version
+      run: go version
+
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Run unit tests
+      run: go test -v ./... -race
+
+    - name: Vet
+      run: go vet ./...
+
+    - name: Install golangci-lint
+      run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+    - name: Run golangci-lint
+      run: golangci-lint run ./...
+

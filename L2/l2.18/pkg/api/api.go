@@ -6,23 +6,22 @@ import (
 	"github.com/IPampurin/calendar-server/pkg/storage"
 )
 
-func Init(db storage.Repository) {
-
-	http.HandleFunc("/create_event", CreateEventHandler) // POST — создание нового события
-
-	http.HandleFunc("/update_event", UpdateEventHandler) // POST — обновление существующего
-
-	http.HandleFunc("/delete_event", DeleteEventHandler) // POST — удаление
-
-	http.HandleFunc("/events_for_day", GetEventsForDayHandler) // GET — получить все события на день
-
-	http.HandleFunc("/events_for_week", GetEventsForWeekHandler) // GET — события на неделю
-
-	http.HandleFunc("/events_for_month", GetEventsForMonthHandler) // GET — события на месяц
+type API struct {
+	Storage storage.Repository
 }
 
-// Answer - ответ на запрос к календарю
-type Answer struct {
-	ID    string `json:"id,omitempty"`
-	Error string `json:"error,omitempty"`
+func NewAPI(db storage.Repository) *API {
+	return &API{Storage: db}
+}
+
+func Init(db storage.Repository) {
+
+	api := NewAPI(db)
+
+	http.HandleFunc("POST /create_event", api.CreateEventHandler)          // POST — создание нового события
+	http.HandleFunc("POST /update_event", api.UpdateEventHandler)          // POST — обновление существующего
+	http.HandleFunc("POST /delete_event", api.DeleteEventHandler)          // POST — удаление
+	http.HandleFunc("GET /events_for_day", api.GetEventsForDayHandler)     // GET — события на день
+	http.HandleFunc("GET /events_for_week", api.GetEventsForWeekHandler)   // GET — события на неделю
+	http.HandleFunc("GET /events_for_month", api.GetEventsForMonthHandler) // GET — события на месяц
 }
