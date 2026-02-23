@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DelayedNotifier — как Wildberries, только для уведомлений</title>
+    <style>
+        /* Стили остаются без изменений, добавлены стили для .copy-btn */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background: #f8f8f8;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .wb-header {
+            background: linear-gradient(90deg, #ff5e8b, #4a90e2);
+            color: white;
+            padding: 16px 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 700;
+            font-size: 24px;
+            letter-spacing: 0.5px;
+        }
+
+        .logo-icon {
+            background: white;
+            color: #8b57b5;
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: 800;
+        }
+
+        .logo-text {
+            text-transform: uppercase;
+        }
+
+        .logo-text span {
+            font-weight: 300;
+            opacity: 0.9;
+        }
+
+        .header-tagline {
+            margin-left: auto;
+            background: rgba(255,255,255,0.15);
+            padding: 8px 16px;
+            border-radius: 40px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .container {
+            max-width: 1400px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 24px;
+            flex: 1;
+        }
+
+        h2 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #222;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        h2:before {
+            content: "•";
+            color: #8b57b5;
+            font-size: 28px;
+        }
+
+        .form-card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+            padding: 24px;
+            margin-bottom: 32px;
+            border: 1px solid #f0f0f0;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+
+        .form-group {
+            flex: 1 1 200px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            font-size: 14px;
+            color: #444;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        input[type="email"],
+        input[type="datetime-local"],
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 14px;
+            transition: 0.2s;
+            background: #fafafa;
+        }
+
+        input:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #8b57b5;
+            background: white;
+            box-shadow: 0 0 0 3px rgba(139, 87, 181, 0.1);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .note {
+            font-size: 12px;
+            color: #888;
+            margin-top: 6px;
+        }
+
+        .wb-button {
+            background: #8b57b5;
+            color: white;
+            border: none;
+            padding: 14px 32px;
+            border-radius: 40px;
+            font-weight: 600;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid transparent;
+        }
+
+        .wb-button:hover {
+            background: #7a49a3;
+        }
+
+        .wb-button:active {
+            transform: scale(0.98);
+        }
+
+        .wb-button.secondary {
+            background: white;
+            color: #8b57b5;
+            border: 1px solid #8b57b5;
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+
+        .wb-button.secondary:hover {
+            background: #f3edf9;
+        }
+
+        .delete-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 30px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .delete-btn:hover {
+            background: #c82333;
+        }
+
+        .refresh-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 30px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .refresh-btn:hover {
+            background: #218838;
+        }
+
+        .copy-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            margin-left: 8px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        .copy-btn:hover {
+            background: #f0f0f0;
+        }
+
+        .table-wrapper {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+            padding: 8px;
+            border: 1px solid #f0f0f0;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+
+        th {
+            text-align: left;
+            padding: 16px 12px;
+            background: #fafafa;
+            color: #444;
+            font-weight: 600;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            border-bottom: 2px solid #eee;
+        }
+
+        td {
+            padding: 16px 12px;
+            border-bottom: 1px solid #f0f0f0;
+            vertical-align: middle;
+            font-size: 14px;
+            color: #333;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background: #fafafa;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 40px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .status-scheduled { 
+            background: #fff3e0; 
+            color: #b45b0f; 
+        }
+        .status-publishing { 
+            background: #cfe2ff; 
+            color: #084298; 
+        }
+        .status-sent { 
+            background: #e3f5e3; 
+            color: #1e7e34; 
+        }
+        .status-failed { 
+            background: #ffe6e6; 
+            color: #b02a37; 
+        }
+        .status-cancelled { 
+            background: #e9ecef; 
+            color: #495057; 
+        }
+
+        .last-error {
+            color: #dc3545;
+            font-size: 12px;
+            max-width: 200px;
+            word-break: break-word;
+        }
+
+        .actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .wb-footer {
+            background: white;
+            border-top: 1px solid #eee;
+            padding: 20px 24px;
+            text-align: center;
+            color: #777;
+            font-size: 13px;
+            margin-top: 40px;
+        }
+
+        .uid-short {
+            font-family: monospace;
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 12px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .uid-short:hover {
+            background: #e0e0e0;
+        }
+    </style>
+</head>
+<body>
+    <!-- Шапка Wildberries -->
+    <header class="wb-header">
+        <div class="logo">
+            <div class="logo-icon">WB</div>
+            <div class="logo-text">Delayed<span>Notifier</span></div>
+        </div>
+        <div class="header-tagline">
+            <span>⏰</span> Отложенные уведомления · Скидка 99% на ожидание
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Форма создания -->
+        <h2>Создать уведомление</h2>
+        <div class="form-card">
+            <form id="createForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>ID пользователя (число)</label>
+                        <input type="number" id="user_id" name="user_id" min="1" max="1000000" value="1" required
+                               placeholder="например, 12345">
+                        <div class="note">⭐ от 1 до 1 000 000</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" id="email" name="email" placeholder="example@mail.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Telegram</label>
+                        <input type="text" id="telegram" name="telegram" placeholder="yournik">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Текст уведомления</label>
+                    <textarea id="content" name="content" required placeholder="Например: Ваш заказ готов..."></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Запланированное время</label>
+                        <input type="datetime-local" id="send_for" name="send_for" required>
+                        <div class="note">⏳ минимум +1 минута от сейчас</div>
+                    </div>
+                    <div class="form-group" style="display: flex; align-items: flex-end;">
+                        <button type="submit" class="wb-button">
+                            <span>✚</span> Создать уведомление
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <!-- Таблица уведомлений -->
+        <h2>Созданные уведомления</h2>
+        <div class="table-wrapper">
+            <table id="notificationsTable">
+                <thead>
+                    <tr>
+                        <th>UID (первые символы)</th>
+                        <th>Пользователь</th>
+                        <th>Email</th>
+                        <th>Telegram</th>
+                        <th>Текст</th>
+                        <th>Запланировано</th>
+                        <th>Статус</th>
+                        <th>Отправлено</th>
+                        <th>Ошибка</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody id="notificationsBody">
+                    <!-- JS заполнит -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <footer class="wb-footer">
+        Ⓒ DelayedNotifier, 2026 — все уведомления будут доставлены вовремя, как заказы на Wildberries
+    </footer>
+
+    <script>
+        // --- Скрипт с поддержкой отмены (уведомление остаётся в таблице со статусом cancelled) ---
+        const STORAGE_KEY = 'delayedNotifier_notifications_v3';
+
+        let notifications = [];
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadFromStorage();
+            renderTable();
+            setInterval(refreshAllStatuses, 5000);
+        });
+
+        function saveToStorage() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(notifications));
+        }
+
+        function loadFromStorage() {
+            const stored = localStorage.getItem(STORAGE_KEY);
+            if (stored) {
+                try {
+                    notifications = JSON.parse(stored);
+                } catch (e) {
+                    console.error('Ошибка загрузки из localStorage', e);
+                    notifications = [];
+                }
+            }
+        }
+
+        function validateForm(user_id, email, telegram, send_for) {
+            if (user_id < 1 || user_id > 1000000) {
+                alert('ID пользователя должно быть числом от 1 до 1 000 000.');
+                return false;
+            }
+            if (!email.trim() && !telegram.trim()) {
+                alert('Укажите хотя бы один канал: Email или Telegram.');
+                return false;
+            }
+            const scheduledTime = new Date(send_for);
+            const now = new Date();
+            const minTime = new Date(now.getTime() + 60 * 1000);
+            if (scheduledTime < minTime) {
+                alert('Время отправки должно быть не раньше, чем через 1 минуту от текущего момента.');
+                return false;
+            }
+            return true;
+        }
+
+        document.getElementById('createForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const user_id = parseInt(document.getElementById('user_id').value, 10);
+            const email = document.getElementById('email').value.trim();
+            const telegram = document.getElementById('telegram').value.trim();
+            const content = document.getElementById('content').value.trim();
+            const send_for_local = document.getElementById('send_for').value;
+
+            if (!send_for_local) {
+                alert('Укажите дату и время отправки.');
+                return;
+            }
+
+            if (!validateForm(user_id, email, telegram, send_for_local)) {
+                return;
+            }
+
+            const localDate = new Date(send_for_local + ':00');
+            const send_for_iso = localDate.toISOString();
+
+            const channels = [];
+            if (email) channels.push('email');
+            if (telegram) channels.push('telegram');
+
+            const payload = {
+                user_id: user_id,
+                channel: channels,
+                content: content,
+                send_for: send_for_iso
+            };
+
+            try {
+                const response = await fetch('/notify/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error ${response.status}`);
+                }
+
+                const result = await response.json();
+                if (!result.uid) {
+                    throw new Error('Сервер не вернул UID');
+                }
+
+                const newNotification = {
+                    uid: result.uid,
+                    user_id: user_id,
+                    email: email,
+                    telegram: telegram,
+                    content: content,
+                    send_for: send_for_iso,
+                    status: 'scheduled',
+                    send_at: null,
+                    last_error: ''
+                };
+                notifications.push(newNotification);
+                saveToStorage();
+                renderTable();
+
+                fetchNotificationStatus(result.uid);
+
+                e.target.reset();
+                document.getElementById('user_id').value = 1;
+
+            } catch (error) {
+                alert('Ошибка при создании уведомления: ' + error.message);
+            }
+        });
+
+        async function fetchNotificationStatus(uid) {
+            try {
+                const response = await fetch(`/notify/${uid}`);
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        // Если уведомление не найдено на сервере, удаляем из локального списка
+                        notifications = notifications.filter(n => n.uid !== uid);
+                        saveToStorage();
+                        renderTable();
+                        return;
+                    }
+                    throw new Error(`HTTP error ${response.status}`);
+                }
+                const data = await response.json();
+                const index = notifications.findIndex(n => n.uid === uid);
+                if (index !== -1) {
+                    // Обновляем все поля, которые могли измениться
+                    notifications[index].status = data.status || notifications[index].status;
+                    notifications[index].send_at = data.send_at || null;
+                    notifications[index].last_error = data.last_error || '';
+                    saveToStorage();
+                    renderTable();
+                }
+            } catch (error) {
+                console.error(`Ошибка получения статуса для UID ${uid}:`, error);
+            }
+        }
+
+        async function refreshAllStatuses() {
+            for (const n of notifications) {
+                await fetchNotificationStatus(n.uid);
+            }
+        }
+
+        // Новая функция отмены: не удаляет уведомление, а обновляет его статус на "cancelled"
+        async function cancelNotification(uid) {
+            if (!confirm('Отменить уведомление?')) return;
+            try {
+                const response = await fetch(`/notify/${uid}`, { method: 'DELETE' });
+                if (!response.ok && response.status !== 404) {
+                    throw new Error(`HTTP error ${response.status}`);
+                }
+                
+                // Находим индекс уведомления в массиве
+                const index = notifications.findIndex(n => n.uid === uid);
+                if (index !== -1) {
+                    // Если сервер вернул 404, возможно, уведомление уже удалено, но мы всё равно пометим его как cancelled
+                    // или можно просто удалить из списка, но по условию мы хотим оставить.
+                    // Лучше получить актуальные данные с сервера, но для простоты поставим статус "cancelled".
+                    // В реальном проекте можно было бы повторно запросить /notify/{uid}, но это замедлит интерфейс.
+                    notifications[index].status = 'cancelled';
+                    // Также можно очистить поле last_error, если нужно
+                    // notifications[index].last_error = '';
+                    saveToStorage();
+                    renderTable();
+                }
+            } catch (error) {
+                alert('Ошибка при отмене: ' + error.message);
+            }
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('UUID скопирован: ' + text);
+            }).catch(err => {
+                console.error('Ошибка копирования:', err);
+                // Fallback для старых браузеров
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                alert('UUID скопирован (через fallback): ' + text);
+            });
+        }
+
+        function formatDate(value) {
+            if (value == null) return '-';
+            if (typeof value !== 'string') return '-';
+            const d = new Date(value);
+            return isNaN(d.getTime()) ? '-' : d.toLocaleString();
+        }
+
+        function shortenUid(uid) {
+            if (!uid) return '-';
+            return uid.substring(0, 8) + '…';
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('notificationsBody');
+            tbody.innerHTML = '';
+
+            if (notifications.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 40px;">🥝 Нет уведомлений. Самое время создать!</td></tr>';
+                return;
+            }
+
+            // Сортируем по запланированному времени (от ближайших к дальним)
+            notifications.sort((a, b) => new Date(a.send_for) - new Date(b.send_for));
+
+            for (const n of notifications) {
+                const row = document.createElement('tr');
+                const safeContent = n.content.replace(/"/g, '&quot;');
+                row.innerHTML = `
+                    <td>
+                        <span class="uid-short" title="${n.uid}" onclick="copyToClipboard('${n.uid}')">${shortenUid(n.uid)}</span>
+                        <button class="copy-btn" onclick="copyToClipboard('${n.uid}')" title="Скопировать UUID">📋</button>
+                    </td>
+                    <td>${n.user_id}</td>
+                    <td>${n.email || '-'}</td>
+                    <td>${n.telegram || '-'}</td>
+                    <td title="${safeContent}">${n.content.length > 30 ? n.content.substring(0, 27) + '...' : n.content}</td>
+                    <td>${formatDate(n.send_for)}</td>
+                    <td><span class="status-badge status-${n.status}">${n.status || 'unknown'}</span></td>
+                    <td>${formatDate(n.send_at)}</td>
+                    <td>${n.last_error ? `<div class="last-error">${n.last_error}</div>` : '-'}</td>
+                    <td class="actions">
+                        <button class="refresh-btn" onclick="fetchNotificationStatus('${n.uid}')">⟳</button>
+                        <button class="delete-btn" onclick="cancelNotification('${n.uid}')" title="Отменить уведомление">✕</button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            }
+        }
+
+        // Экспортируем функции в глобальную область для onclick
+        window.fetchNotificationStatus = fetchNotificationStatus;
+        window.cancelNotification = cancelNotification;
+        window.copyToClipboard = copyToClipboard;
+    </script>
+</body>
+</html>
