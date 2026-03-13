@@ -1,0 +1,256 @@
+/* ===== ОБЩИЕ СТИЛИ ===== */
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    font-family: Arial, sans-serif;
+    background: linear-gradient(135deg, #2b2b2b, #a0a0a0);
+}
+
+/* ===== ЛОГОТИП ===== */
+.logo {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    font-size: 2rem;
+    font-weight: 800;
+    color: #8A2BE2;              /* фирменный фиолетовый Wildberries */
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    letter-spacing: 2px;
+    z-index: 1000;                /* чтобы быть поверх других элементов */
+}
+
+/* ===== ТИТУЛЬНАЯ СТРАНИЦА ===== */
+.split-layout {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 80%;
+    height: 80vh;
+    max-width: 1200px;
+    margin: 10vh auto 0;
+}
+
+.left-circle, .right-circle {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.circle-button {
+    width: 250px;
+    height: 250px;
+    border-radius: 50%;
+    background-color: #8A2BE2;
+    color: white;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: 1.5rem;
+    font-weight: bold;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    transition: transform 0.3s, background-color 0.3s;
+    border: 2px solid #333;
+}
+
+.circle-button:hover {
+    transform: scale(1.05);
+    background-color: #9B30FF;
+}
+
+.vertical-line {
+    width: 2px;
+    height: 80%;
+    background-color: #1a1a1a;
+    margin: 0 20px;
+}
+
+/* ===== АДМИНКА И ПОЛЬЗОВАТЕЛЬСКАЯ СТРАНИЦА ===== */
+.admin-page, .user-page {
+    max-width: 1200px;
+    margin: 20px auto;
+    padding: 20px;
+    background: transparent;
+    border-radius: 10px;
+}
+
+.admin-page h1, .user-page h1,
+.admin-page h2, .user-page h2 {
+    color: white;
+    text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+}
+
+/* Кнопки */
+button {
+    background-color: #8A2BE2;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1rem;
+    margin: 5px;
+    transition: background-color 0.3s;
+}
+
+button:hover {
+    background-color: #9B30FF;
+}
+
+input, textarea {
+    padding: 8px;
+    margin: 5px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+    color: white;
+}
+
+/* Список мероприятий */
+.event-header {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 10px 15px;
+    margin: 10px 0;
+    background: rgba(0,0,0,0.5);
+    border-radius: 5px;
+    font-weight: bold;
+    color: white;
+    border: 1px solid rgba(255,255,255,0.3);
+}
+
+.event-header span {
+    color: white;
+}
+
+.event-header .event-id { min-width: 60px; }
+.event-header .event-name { min-width: 150px; }
+.event-header .event-date { min-width: 180px; }
+.event-header .event-seats { min-width: 80px; }
+.event-header .event-price { min-width: 80px; }
+.event-header .event-actions-header { min-width: 120px; }
+
+.event-item {
+    border: 1px solid rgba(255,255,255,0.3);
+    padding: 10px 15px;
+    margin: 10px 0;
+    border-radius: 5px;
+    background: rgba(0,0,0,0.3);
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.event-item span {
+    color: white;
+}
+
+.event-item .event-id { min-width: 60px; }
+.event-item .event-name { min-width: 150px; font-weight: bold; }
+.event-item .event-date { min-width: 180px; }
+.event-item .event-seats { min-width: 80px; }
+.event-item .event-price { min-width: 80px; }
+.event-item .event-actions { min-width: 120px; }
+
+.event-actions button {
+    margin-left: 0;
+}
+
+/* Модальные окна */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.5);
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 15% auto;
+    padding: 20px;
+    border: 1px solid #888;
+    width: 80%;
+    max-width: 500px;
+    border-radius: 10px;
+    color: black;
+}
+
+.close {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.close:hover {
+    color: black;
+}
+
+/* Уведомления */
+.notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: #4CAF50;
+    color: white;
+    padding: 15px;
+    border-radius: 5px;
+    display: none;
+    z-index: 1000;
+}
+
+.notification.error {
+    background: #f44336;
+}
+
+/* Модальное окно входа/регистрации */
+.split-modal {
+    display: flex;
+    gap: 20px;
+}
+
+.split-modal > div {
+    flex: 1;
+    padding: 10px;
+    border-left: 2px solid #333;
+}
+
+.split-modal > div:first-child {
+    border-left: none;
+}
+
+/* Заглушка после подтверждения */
+.confirmed-placeholder {
+    color: #4CAF50;
+    font-weight: bold;
+    background: rgba(255,255,255,0.2);
+    padding: 5px 10px;
+    border-radius: 5px;
+    display: inline-block;
+}
