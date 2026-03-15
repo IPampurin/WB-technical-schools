@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SalesTracker — учёт и аналитика продаж</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header class="wb-header">
+        <div class="logo">
+            <div class="logo-icon">ST</div>
+            <div class="logo-text">Sales<span>Tracker</span></div>
+        </div>
+        <div class="header-tagline">
+            <span>📊</span> Управляй продажами · Считай аналитику
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Форма добавления/редактирования записи -->
+        <h2>➕ Добавить / ✏️ Редактировать</h2>
+        <div class="form-card">
+            <form id="itemForm">
+                <input type="hidden" id="editId" value="">
+                <div class="form-row">
+                    <div class="form-group" style="flex: 1.5;">
+                        <label>Категория</label>
+                        <select id="category" required>
+                            <option value="">Выберите категорию</option>
+                            <option value="Продукты">Продукты</option>
+                            <option value="Транспорт">Транспорт</option>
+                            <option value="Развлечения">Развлечения</option>
+                            <option value="Здоровье">Здоровье</option>
+                            <option value="Другое">Другое</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Сумма (₽)</label>
+                        <input type="number" id="amount" step="0.01" min="0" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Дата</label>
+                        <input type="date" id="date" required>
+                    </div>
+                </div>
+                <div class="flex-row">
+                    <button type="submit" class="wb-button" id="formSubmitBtn">
+                        <span>💾</span> Сохранить
+                    </button>
+                    <button type="button" class="wb-button secondary hidden" id="cancelEditBtn">Отмена</button>
+                    <span class="note">* обязательные поля</span>
+                </div>
+            </form>
+        </div>
+
+        <!-- Фильтр по дате и кнопки действий -->
+        <div class="filter-section">
+            <div class="filter-item">
+                <label>Дата с</label>
+                <input type="date" id="fromDate">
+            </div>
+            <div class="filter-item">
+                <label>Дата по</label>
+                <input type="date" id="toDate">
+            </div>
+            <div class="filter-actions">
+                <button class="wb-button secondary" id="applyFilterBtn">🔍 Применить</button>
+                <button class="csv-btn" id="exportCsvBtn"><span>⬇️</span> CSV</button>
+                <button class="group-btn" id="groupBtn"><span>📊</span> Группировка по категориям</button>
+            </div>
+        </div>
+
+        <!-- Блок аналитики -->
+        <div class="analytics-row">
+            <div class="metrics" id="metricsContainer">
+                <div class="metric-card"><div class="label">Сумма</div><div class="value" id="sumValue">0 ₽</div></div>
+                <div class="metric-card"><div class="label">Среднее</div><div class="value" id="avgValue">0 ₽</div></div>
+                <div class="metric-card"><div class="label">Кол-во</div><div class="value" id="countValue">0</div></div>
+                <div class="metric-card"><div class="label">Медиана</div><div class="value" id="medianValue">0 ₽</div></div>
+                <div class="metric-card"><div class="label">90‑й перцентиль</div><div class="value" id="percentile90Value">0 ₽</div></div>
+            </div>
+        </div>
+
+        <!-- Блок группировки (скрыт по умолчанию) -->
+        <div id="groupSection" class="group-section hidden">
+            <h4>📌 Суммы по категориям</h4>
+            <table class="group-table">
+                <thead><tr><th>Категория</th><th>Сумма (₽)</th><th>Количество</th></tr></thead>
+                <tbody id="groupBody"></tbody>
+            </table>
+        </div>
+
+        <!-- Таблица записей -->
+        <h2>📋 Записи</h2>
+        <div class="table-wrapper">
+            <table id="itemsTable">
+                <thead>
+                    <tr>
+                        <th data-field="date">Дата</th>
+                        <th data-field="category">Категория</th>
+                        <th data-field="amount">Сумма (₽)</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody id="itemsBody">
+                    <!-- Данные будут загружены через JS -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Уведомления -->
+    <div id="notification" class="notification"></div>
+
+    <footer class="wb-footer">
+        Ⓒ SalesTracker, 2026 — учитывай продажи, строй аналитику, управляй бюджетом
+    </footer>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
