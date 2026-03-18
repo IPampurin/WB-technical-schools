@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Наблюдатель - Warehouse Control</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="logo">WarehouseControl</div>
+    <div class="admin-page">
+        <h1>Панель наблюдателя</h1>
+        <button id="logoutBtn">Выйти</button>
+        <div id="itemsList" style="margin-top: 30px;">
+            <h2>Список товаров</h2>
+            <div id="itemsContainer">
+                <div class="item-header">
+                    <span class="item-id">ID</span>
+                    <span class="item-name">Название</span>
+                    <span class="item-quantity">Количество</span>
+                    <span class="item-price">Цена</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="notification" class="notification"></div>
+    <script src="/static/script.js"></script>
+</body>
+</html>

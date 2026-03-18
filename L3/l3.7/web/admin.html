@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Администратор - Warehouse Control</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="logo">WarehouseControl</div>
+    <div class="admin-page">
+        <h1>Панель администратора</h1>
+        <button id="logoutBtn">Выйти</button>
+
+        <!-- Вкладки -->
+        <div class="tabs">
+            <button class="tab-button active" data-tab="items">Товары</button>
+            <button class="tab-button" data-tab="history">История</button>
+        </div>
+
+        <!-- Вкладка "Товары" -->
+        <div id="tab-items" class="tab-content active">
+            <button id="createItemBtn">Добавить товар</button>
+            <button id="exportItemsCsvBtn">Экспорт товаров CSV</button>
+            <div id="createForm" style="display: none; margin: 20px 0;">
+                <h3>Новый товар</h3>
+                <div class="form-group">
+                    <label>Название:</label>
+                    <input type="text" id="itemName" required>
+                </div>
+                <div class="form-group">
+                    <label>Количество:</label>
+                    <input type="number" id="itemQuantity" min="0" required>
+                </div>
+                <div class="form-group">
+                    <label>Цена:</label>
+                    <input type="number" id="itemPrice" min="0" step="0.01" required>
+                </div>
+                <button id="publishItemBtn">Сохранить</button>
+                <button id="cancelCreateBtn">Отмена</button>
+            </div>
+            <div id="itemsList" style="margin-top: 30px;">
+                <h2>Список товаров</h2>
+                <div id="itemsContainer">
+                    <div class="item-header">
+                        <span class="item-id">ID</span>
+                        <span class="item-name">Название</span>
+                        <span class="item-quantity">Количество</span>
+                        <span class="item-price">Цена</span>
+                        <span class="item-actions-header">Действия</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Вкладка "История" (глобальная) -->
+        <div id="tab-history" class="tab-content">
+            <h2>История изменений</h2>
+            <div class="filters">
+                <div class="filter-group">
+                    <label>Товар ID:</label>
+                    <input type="number" id="historyItemId" placeholder="все">
+                </div>
+                <div class="filter-group">
+                    <label>Дата с:</label>
+                    <input type="datetime-local" id="historyFromDate">
+                </div>
+                <div class="filter-group">
+                    <label>Дата по:</label>
+                    <input type="datetime-local" id="historyToDate">
+                </div>
+                <div class="filter-group">
+                    <label>Пользователь ID:</label>
+                    <input type="number" id="historyUserId">
+                </div>
+                <div class="filter-group">
+                    <label>Действие:</label>
+                    <select id="historyAction">
+                        <option value="">все</option>
+                        <option value="INSERT">INSERT</option>
+                        <option value="UPDATE">UPDATE</option>
+                        <option value="DELETE">DELETE</option>
+                    </select>
+                </div>
+                <button id="applyHistoryFilters">Применить</button>
+                <button id="exportHistoryCsvBtn">Экспорт CSV</button>
+            </div>
+            <div id="historyTableContainer">
+                <!-- таблица истории будет построена динамически -->
+                <div class="history-header">
+                    <span class="history-select"></span>
+                    <span class="history-id">ID</span>
+                    <span class="history-item-id">Товар</span>
+                    <span class="history-action">Действие</span>
+                    <span class="history-user">Пользователь</span>
+                    <span class="history-date">Дата</span>
+                    <span class="history-changes">Изменения</span>
+                </div>
+                <div id="historyRows"></div>
+            </div>
+            <button id="compareSelectedBtn" disabled>Сравнить выбранные (2)</button>
+        </div>
+
+        <!-- Модальные окна (без изменений) -->
+        <div id="editModal" class="modal">
+            <div class="modal-content">
+                <span class="close" id="closeEditModal">&times;</span>
+                <h3>Редактировать товар</h3>
+                <input type="hidden" id="editItemId">
+                <div class="form-group">
+                    <label>Название:</label>
+                    <input type="text" id="editItemName" required>
+                </div>
+                <div class="form-group">
+                    <label>Количество:</label>
+                    <input type="number" id="editItemQuantity" min="0" required>
+                </div>
+                <div class="form-group">
+                    <label>Цена:</label>
+                    <input type="number" id="editItemPrice" min="0" step="0.01" required>
+                </div>
+                <button id="updateItemBtn">Обновить</button>
+            </div>
+        </div>
+
+        <div id="itemHistoryModal" class="modal">
+            <div class="modal-content" style="max-width: 900px;">
+                <span class="close" id="closeItemHistoryModal">&times;</span>
+                <h3>История товара <span id="itemHistoryItemId"></span></h3>
+                <div class="filters" style="margin-bottom: 15px;">
+                    <div class="filter-group">
+                        <label>Дата с:</label>
+                        <input type="datetime-local" id="itemHistoryFromDate">
+                    </div>
+                    <div class="filter-group">
+                        <label>Дата по:</label>
+                        <input type="datetime-local" id="itemHistoryToDate">
+                    </div>
+                    <div class="filter-group">
+                        <label>Пользователь ID:</label>
+                        <input type="number" id="itemHistoryUserId">
+                    </div>
+                    <div class="filter-group">
+                        <label>Действие:</label>
+                        <select id="itemHistoryAction">
+                            <option value="">все</option>
+                            <option value="INSERT">INSERT</option>
+                            <option value="UPDATE">UPDATE</option>
+                            <option value="DELETE">DELETE</option>
+                        </select>
+                    </div>
+                    <button id="applyItemHistoryFilters">Применить</button>
+                    <button id="exportItemHistoryCsvBtn">Экспорт CSV</button>
+                </div>
+                <div id="itemHistoryTableContainer">
+                    <div class="history-header">
+                        <span class="history-select"></span>
+                        <span class="history-id">ID</span>
+                        <span class="history-action">Действие</span>
+                        <span class="history-user">Пользователь</span>
+                        <span class="history-date">Дата</span>
+                        <span class="history-changes">Изменения</span>
+                    </div>
+                    <div id="itemHistoryRows"></div>
+                </div>
+                <button id="compareItemSelectedBtn" disabled>Сравнить выбранные (2)</button>
+            </div>
+        </div>
+
+        <div id="diffModal" class="modal">
+            <div class="modal-content" style="max-width: 600px;">
+                <span class="close" id="closeDiffModal">&times;</span>
+                <h3>Различия между версиями</h3>
+                <div id="diffContent"></div>
+            </div>
+        </div>
+    </div>
+    <div id="notification" class="notification"></div>
+    <script src="/static/script.js"></script>
+</body>
+</html>
