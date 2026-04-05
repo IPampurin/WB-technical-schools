@@ -1,0 +1,17 @@
+version: '3.9'
+
+services:
+  
+  metricsserver:
+    build: .
+    container_name: metrics-server
+    ports:
+      - ${HTTP_PORT}:${HTTP_PORT}
+    env_file:
+      - .env
+    networks:
+      - metrics-network
+
+networks:
+  metrics-network:
+    driver: bridge
