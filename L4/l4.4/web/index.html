@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GC & Memory Monitor — метрики в реальном времени</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header class="wb-header">
+        <div class="logo">
+            <div class="logo-icon">⚙️</div>
+            <div class="logo-text">GC<span>Monitor</span></div>
+        </div>
+        <div class="header-tagline">
+            <span>📊</span> Метрики памяти и сборщика мусора
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Карточка управления GOGC -->
+        <div class="control-card">
+            <div class="control-header">
+                <h2>⚙️ Управление GOGC</h2>
+                <div class="control-actions">
+                    <span>Текущий процент:</span>
+                    <span id="currentGcPercent" class="gc-percent-value">—</span>
+                    <input type="number" id="newGcPercent" placeholder="Новое значение" value="100" step="10">
+                    <button id="setGcBtn" class="btn btn-primary">Установить</button>
+                    <button id="refreshGcBtn" class="btn btn-secondary">Обновить</button>
+                </div>
+            </div>
+            <div id="gcStatus" class="status-message"></div>
+        </div>
+
+        <!-- Сетка метрик -->
+        <div class="section-header">
+            <h2>📈 Актуальные метрики</h2>
+            <span id="updateIndicator" class="update-indicator"></span>
+        </div>
+        <div class="metrics-grid" id="metricsGrid">
+            <!-- Карточки будут добавлены динамически через JS -->
+        </div>
+
+        <!-- Ссылки на дополнительные эндпоинты -->
+        <div class="footer-links">
+            <a href="/metrics" target="_blank" class="btn btn-secondary">📊 Prometheus метрики</a>
+            <a href="/debug/pprof/" target="_blank" class="btn btn-secondary">🔍 pprof профилирование</a>
+        </div>
+    </div>
+
+    <footer class="wb-footer">
+        GC Monitor — реальные метрики памяти, GC, возможность изменения GOGC в реальном времени
+    </footer>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
