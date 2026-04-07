@@ -1,0 +1,41 @@
+goos: windows
+goarch: amd64
+pkg: github.com/IPampurin/pprofSimpleService/internal/service
+cpu: Intel(R) Core(TM) i5-4570 CPU @ 3.20GHz
+BenchmarkSum-4             	1000000000	         0.3343 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSum-4             	1000000000	         0.3176 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSum-4             	1000000000	         0.3209 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSum-4             	1000000000	         0.3358 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSum-4             	1000000000	         0.3431 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFibN20-4          	124906774	         9.501 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFibN20-4          	124006821	         9.946 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFibN20-4          	120729702	         9.589 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFibN20-4          	126610898	         9.633 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFibN20-4          	125654541	        11.88 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFibN30-4          	82869493	        14.42 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFibN30-4          	88003636	        14.52 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFibN30-4          	82916446	        14.40 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFibN30-4          	77662362	        15.07 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFibN30-4          	86332797	        14.64 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFibN40-4          	85754100	        14.46 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFibN40-4          	90400927	        13.85 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFibN40-4          	87267014	        14.38 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFibN40-4          	75930624	        14.41 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFibN40-4          	91853371	        14.45 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllocate1MB-4     	   12564	     84179 ns/op	 1048576 B/op	       1 allocs/op
+BenchmarkAllocate1MB-4     	   15698	     75252 ns/op	 1048576 B/op	       1 allocs/op
+BenchmarkAllocate1MB-4     	   15919	     75787 ns/op	 1048576 B/op	       1 allocs/op
+BenchmarkAllocate1MB-4     	   13753	     76108 ns/op	 1048576 B/op	       1 allocs/op
+BenchmarkAllocate1MB-4     	   15625	     95352 ns/op	 1048576 B/op	       1 allocs/op
+BenchmarkAllocate10MB-4    	    1378	    845139 ns/op	10485760 B/op	       1 allocs/op
+BenchmarkAllocate10MB-4    	    1204	    850193 ns/op	10485760 B/op	       1 allocs/op
+BenchmarkAllocate10MB-4    	    1849	    954846 ns/op	10485760 B/op	       1 allocs/op
+BenchmarkAllocate10MB-4    	    1516	    867251 ns/op	10485761 B/op	       1 allocs/op
+BenchmarkAllocate10MB-4    	    1742	    831165 ns/op	10485760 B/op	       1 allocs/op
+BenchmarkAllocate100MB-4   	     190	   5634013 ns/op	104857600 B/op	       1 allocs/op
+BenchmarkAllocate100MB-4   	     216	   5940639 ns/op	104857600 B/op	       1 allocs/op
+BenchmarkAllocate100MB-4   	     202	   6765390 ns/op	104857600 B/op	       1 allocs/op
+BenchmarkAllocate100MB-4   	     208	   5800955 ns/op	104857600 B/op	       1 allocs/op
+BenchmarkAllocate100MB-4   	     192	   6297531 ns/op	104857600 B/op	       1 allocs/op
+PASS
+ok  	github.com/IPampurin/pprofSimpleService/internal/service	54.091s
